@@ -1,0 +1,14 @@
+{
+  "title": "Victron GX MQTT",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Victron GX MQTT",
+        "description": "Minimaler Setup-Schritt, um zu prüfen, ob die Integration korrekt lädt.",
+        "data": {
+          "name": "Name"
+        }
+      }
+    }
+  }
+}
