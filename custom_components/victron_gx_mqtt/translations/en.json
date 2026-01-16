@@ -3,12 +3,24 @@
   "config": {
     "step": {
       "user": {
-        "title": "Victron GX MQTT",
-        "description": "This is a minimal setup step to verify the integration loads correctly.",
+        "title": "Connect a Victron GX MQTT source",
+        "description": "Enter the MQTT topic prefix used by your Mosquitto bridge and the VRM Portal ID of your GX system.",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "topic_prefix": "Topic prefix",
+          "portal_id": "VRM Portal ID"
+        }
+      },
+      "services": {
+        "title": "Select what to create",
+        "description": "Choose which service groups the integration should create. Only VE.Bus (Base) is implemented in this pre-release.",
+        "data": {
+          "selected_services": "Service groups"
         }
       }
+    },
+    "error": {
+      "required": "This field is required."
     }
   }
 }
