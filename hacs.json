@@ -1,0 +1,5 @@
+{
+  "name": "Victron GX MQTT",
+  "domains": ["victron_gx_mqtt"],
+  "render_readme": true
+}
