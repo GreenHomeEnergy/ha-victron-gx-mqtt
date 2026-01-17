@@ -21,13 +21,7 @@ SIGNAL_MQTT_MESSAGE = f"{DOMAIN}_mqtt_message"
 _TOPIC_RE = re.compile(r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/(?P<rest>.+)$")
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    hass.data.setdefault(DOMAIN, {})
-    return True
-
-
 def _slug(text: str) -> str:
-    """Slugify text for stable Home Assistant entity_id parts."""
     text = (text or "").strip().lower()
     out: list[str] = []
     prev_us = False
@@ -41,66 +35,81 @@ def _slug(text: str) -> str:
                 out.append("_")
                 prev_us = True
     s = "".join(out).strip("_")
-    return s or "gx"
+    return s or "home"
 
 
 async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Rename previously created entity_ids to the new naming convention.
+    """Best-effort migration to the fixed entity_id scheme based on the config entry name.
 
-    Old pattern (example):
-      sensor.ve_bus_276_ve_bus_state
-      select.ve_bus_276_ve_bus_mode
+    Project decision (repeatable naming): entity_ids are prefixed with the integration
+    instance name configured during setup (Config Entry title / CONF_NAME). Instance
+    numbers from Victron (e.g. 276) must not appear in entity_ids.
 
-    New pattern (example):
+    Target patterns (examples with cfg='ve_base'):
       sensor.ve_base_ve_bus_state
       select.ve_base_ve_bus_mode
+      sensor.ve_base_ve_bus_ac_out_l1_power
 
-    Notes:
-    - We keep unique_id stable (it includes the instance).
-    - We only rename entity_id (registry) when it matches the old pattern.
+    Migration handles the common historical patterns:
+      sensor.ve_bus_276_ac_out_l1_power -> sensor.<cfg>_ve_bus_ac_out_l1_power
+      sensor.ve_bus_ac_out_l1_power     -> sensor.<cfg>_ve_bus_ac_out_l1_power
+      sensor.<oldcfg>_ve_bus_*          -> sensor.<cfg>_ve_bus_*
     """
 
-    cfg_name: str = entry.data.get(CONF_NAME, "")
-    slug_cfg = _slug(cfg_name)
+    cfg = _slug(entry.title or entry.data.get(CONF_NAME, "home"))
 
     ent_reg = er.async_get(hass)
     entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
 
+    # 1) ve_bus_<instance>_<rest>
+    p_inst = re.compile(r"^(?P<domain>sensor|select)\.ve_bus_(?P<inst>\d+)_(?P<rest>.+)$")
+    # 2) ve_bus_<rest>
+    p_noinst = re.compile(r"^(?P<domain>sensor|select)\.ve_bus_(?P<rest>.+)$")
+    # 3) <oldcfg>_ve_bus_<rest>
+    p_cfg = re.compile(r"^(?P<domain>sensor|select)\.(?P<oldcfg>[a-z0-9_]+)_ve_bus_(?P<rest>.+)$")
+
     for e in entries:
-        # Only touch our own entities.
-        if e.platform != DOMAIN:
+        new_entity_id: str | None = None
+
+        m = p_inst.match(e.entity_id)
+        if m:
+            new_entity_id = f"{m.group('domain')}.{cfg}_ve_bus_{m.group('rest')}"
+
+        if new_entity_id is None:
+            m = p_noinst.match(e.entity_id)
+            if m:
+                new_entity_id = f"{m.group('domain')}.{cfg}_ve_bus_{m.group('rest')}"
+
+        if new_entity_id is None:
+            m = p_cfg.match(e.entity_id)
+            if m and m.group("oldcfg") != cfg:
+                new_entity_id = f"{m.group('domain')}.{cfg}_ve_bus_{m.group('rest')}"
+
+        if not new_entity_id or new_entity_id == e.entity_id:
             continue
 
-        # Mode
-        if e.domain == "select" and e.entity_id.startswith("select.ve_bus_") and e.entity_id.endswith("_ve_bus_mode"):
-            desired = f"select.{slug_cfg}_ve_bus_mode"
-        # State
-        elif e.domain == "sensor" and e.entity_id.startswith("sensor.ve_bus_") and e.entity_id.endswith("_ve_bus_state"):
-            desired = f"sensor.{slug_cfg}_ve_bus_state"
-        else:
+        # Avoid collisions if something already exists.
+        if ent_reg.async_get(new_entity_id) is not None:
             continue
 
-        if e.entity_id == desired:
-            continue
+        ent_reg.async_update_entity(e.entity_id, new_entity_id=new_entity_id)
 
-        # Avoid collisions if a user already renamed something.
-        if ent_reg.async_get(desired) is not None:
-            continue
 
-        ent_reg.async_update_entity(e.entity_id, new_entity_id=desired)
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    hass.data.setdefault(DOMAIN, {})
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
 
-    cfg_name: str = entry.data[CONF_NAME]
     prefix: str = entry.data[CONF_TOPIC_PREFIX]
     portal: str = entry.data[CONF_PORTAL_ID]
 
     subscribe_topic = f"{prefix}/N/{portal}/#"
 
-    # Best-effort entity_id migration (renames old ve_bus_<instance>_* entity_ids).
+    # Best-effort entity_id migration (enforces <cfg>_ve_bus_* naming)
     await _async_migrate_entity_ids(hass, entry)
 
     @callback
@@ -132,79 +141,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id]["unsub"] = unsub
     hass.data[DOMAIN][entry.entry_id]["signal"] = SIGNAL_MQTT_MESSAGE
 
-    # ---------------------------------------------------------------------
-    # Entity-ID migration / Bereinigung
-    # ---------------------------------------------------------------------
-    # Earlier pre-releases generated entity_id patterns like:
-    #   sensor.ve_bus_276_ve_bus_state
-    #   select.ve_bus_276_ve_bus_mode
-    # Starting with v0.1.5-pre-6 we want:
-    #   sensor.<cfg>_ve_bus_state
-    #   select.<cfg>_ve_bus_mode
-    # HA keeps entity_id in the entity registry, so we proactively rename
-    # existing entries (idempotent, best-effort).
-    await _async_migrate_entity_ids(hass, entry)
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
-
-
-def _slug(text: str) -> str:
-    text = (text or "").strip().lower()
-    out: list[str] = []
-    prev_us = False
-    for ch in text:
-        ok = ("a" <= ch <= "z") or ("0" <= ch <= "9")
-        if ok:
-            out.append(ch)
-            prev_us = False
-        else:
-            if not prev_us:
-                out.append("_")
-                prev_us = True
-    s = "".join(out).strip("_")
-    return s or "gx"
-
-
-async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Rename legacy entity_ids to the new object_id convention.
-
-    This is best-effort: if an entity does not exist or the target already
-    exists, we leave it untouched.
-    """
-
-    cfg_name: str = entry.data.get(CONF_NAME, "")
-    slug_cfg = _slug(cfg_name)
-
-    desired: dict[str, str] = {
-        "sensor": f"sensor.{slug_cfg}_ve_bus_state",
-        "select": f"select.{slug_cfg}_ve_bus_mode",
-    }
-
-    ent_reg = er.async_get(hass)
-    for entity in list(ent_reg.entities.values()):
-        if entity.config_entry_id != entry.entry_id:
-            continue
-        if entity.domain not in desired:
-            continue
-
-        # Only rename the known legacy patterns (instance encoded in entity_id).
-        # Example: sensor.ve_bus_276_ve_bus_state -> sensor.<cfg>_ve_bus_state
-        if entity.entity_id in desired.values():
-            continue
-
-        if entity.domain == "sensor" and entity.entity_id.endswith("_ve_bus_state"):
-            target = desired["sensor"]
-        elif entity.domain == "select" and entity.entity_id.endswith("_ve_bus_mode"):
-            target = desired["select"]
-        else:
-            continue
-
-        # Avoid collisions.
-        if ent_reg.async_get(target) is not None:
-            continue
-
-        ent_reg.async_update_entity(entity.entity_id, new_entity_id=target)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

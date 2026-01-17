@@ -13,6 +13,9 @@ CONF_PORTAL_ID: Final = "portal_id"
 
 PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.SELECT]
 
+# Global fixed naming (project decision)
+VE_BUS_DEVICE_NAME: Final = "VE-Bus"
+
 # -----------------------------------------------------------------------------
 # VE.Bus State (Sensor)
 # -----------------------------------------------------------------------------

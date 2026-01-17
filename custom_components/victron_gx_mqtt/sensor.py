@@ -27,6 +27,7 @@ from .const import (
     VE_BUS_STATE_MAP,
     VE_BUS_STATE_MAP_DE,
     VE_BUS_STATE_MAP_EN,
+    VE_BUS_DEVICE_NAME,
 )
 
 _VEBUS_STATE_RE = re.compile(
@@ -104,15 +105,9 @@ def _device_ident(portal_id: str, vebus_instance: str) -> str:
 
 
 def _update_device_name(hass: HomeAssistant, portal_id: str, vebus_instance: str, name: str) -> None:
-    """Persistently update the HA device name when CustomName arrives."""
-    reg = dr.async_get(hass)
-    ident = (DOMAIN, _device_ident(portal_id, vebus_instance))
-    dev = reg.async_get_device(identifiers={ident})
-    if dev is None:
-        return
-    # Only update if changed to avoid needless registry writes.
-    if dev.name != name:
-        reg.async_update_device(dev.id, name=name)
+    """CustomName is intentionally not used for the HA device name (fixed naming)."""
+    return
+
 
 
 async def async_setup_entry(
@@ -121,6 +116,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     cfg_name: str = entry.data[CONF_NAME]
+    cfg_slug: str = _slug(cfg_name)
     prefix: str = entry.data[CONF_TOPIC_PREFIX]
     portal: str = entry.data[CONF_PORTAL_ID]
 
@@ -141,9 +137,6 @@ async def async_setup_entry(
             if isinstance(v, str) and v.strip():
                 custom_name = v.strip()
                 runtime.customname_by_instance[inst] = custom_name
-
-                # Persistently update device name in registry.
-                _update_device_name(hass, portal, inst, custom_name)
 
                 ent = runtime.state_entities.get(inst)
                 if ent:
@@ -174,6 +167,7 @@ async def async_setup_entry(
                     hass=hass,
                     entry=entry,
                     cfg_name=cfg_name,
+                    cfg_slug=cfg_slug,
                     portal_id=portal,
                     vebus_instance=inst,
                     custom_name=runtime.customname_by_instance.get(inst),
@@ -199,6 +193,7 @@ async def async_setup_entry(
                 hass=hass,
                 entry=entry,
                 cfg_name=cfg_name,
+                cfg_slug=cfg_slug,
                 portal_id=portal,
                 vebus_instance=inst,
                 custom_name=runtime.customname_by_instance.get(inst),
@@ -214,13 +209,16 @@ async def async_setup_entry(
 class VictronVeBusStateSensor(SensorEntity):
     """VE.Bus State sensor."""
 
-    _attr_has_entity_name = True
+    # Use explicit entity names (not "device name + entity name") to keep naming
+    # stable and predictable across installations.
+    _attr_has_entity_name = False
 
     def __init__(
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
         cfg_name: str,
+        cfg_slug: str,
         portal_id: str,
         vebus_instance: str,
         custom_name: str | None,
@@ -228,12 +226,13 @@ class VictronVeBusStateSensor(SensorEntity):
         self.hass = hass
         self._entry = entry
         self._cfg_name = cfg_name
+        self._cfg_slug = cfg_slug
         self._portal = portal_id
         self._instance = vebus_instance
         self._custom_name = custom_name
         self._state_code: int | None = None
 
-        dev_name = custom_name or f"VE.Bus {vebus_instance}"
+        dev_name = VE_BUS_DEVICE_NAME
         self._attr_device_info = DeviceInfo(
             # MUST match Select entity to merge under same HA device.
             identifiers={(DOMAIN, _device_ident(portal_id, vebus_instance))},
@@ -246,17 +245,17 @@ class VictronVeBusStateSensor(SensorEntity):
         self._attr_name = "VE-Bus State"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_state"
 
-        slug_cfg = _slug(cfg_name)
-        # Entity-ID convention (object_id): <cfg> + <service> + <endpoint>
+        # Entity-ID convention (object_id): prefixed with integration instance name
+        # (created during integration setup). Victron instance numbers must not
+        # appear in entity_ids.
         # Example: sensor.ve_base_ve_bus_state
-        self._attr_object_id = f"{slug_cfg}_ve_bus_state"
+        self._attr_object_id = f"{self._cfg_slug}_ve_bus_state"
 
         self._attr_native_value = None
 
     def set_custom_name(self, custom_name: str) -> None:
         self._custom_name = custom_name
         # Ensure device name is persisted.
-        _update_device_name(self.hass, self._portal, self._instance, custom_name)
         self.async_write_ha_state()
 
     @callback
@@ -336,13 +335,16 @@ def _ac_out_key(phase: str | None, metric: str) -> str | None:
 class VictronVeBusAcOutSensor(SensorEntity):
     """VE.Bus AC Out sensors (Total and per phase)."""
 
-    _attr_has_entity_name = True
+    # Use explicit entity names (not "device name + entity name") to keep naming
+    # stable and predictable across installations.
+    _attr_has_entity_name = False
 
     def __init__(
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
         cfg_name: str,
+        cfg_slug: str,
         portal_id: str,
         vebus_instance: str,
         custom_name: str | None,
@@ -351,12 +353,13 @@ class VictronVeBusAcOutSensor(SensorEntity):
         self.hass = hass
         self._entry = entry
         self._cfg_name = cfg_name
+        self._cfg_slug = cfg_slug
         self._portal = portal_id
         self._instance = vebus_instance
         self._custom_name = custom_name
         self._sdef = sdef
 
-        dev_name = custom_name or f"VE.Bus {vebus_instance}"
+        dev_name = VE_BUS_DEVICE_NAME
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, _device_ident(portal_id, vebus_instance))},
             name=dev_name,
@@ -364,14 +367,15 @@ class VictronVeBusAcOutSensor(SensorEntity):
             model="VE.Bus",
         )
 
-        # UI name (entity-name only; device name comes from CustomName).
-        self._attr_name = sdef.entity_name
+        # UI name (explicit) - always prefixed with "VE-Bus".
+        self._attr_name = f"VE-Bus {sdef.entity_name}"
 
         # Keep unique_id instance-based and stable.
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_{sdef.key}"
 
-        slug_cfg = _slug(cfg_name)
-        self._attr_object_id = f"{slug_cfg}_ve_bus_{sdef.object_id_suffix}"
+        # Entity-ID convention (object_id): prefixed with integration instance name
+        # Example: sensor.ve_base_ve_bus_ac_out_l1_power
+        self._attr_object_id = f"{self._cfg_slug}_ve_bus_{sdef.object_id_suffix}"
 
         self._attr_device_class = sdef.device_class
         self._attr_state_class = sdef.state_class
@@ -385,7 +389,6 @@ class VictronVeBusAcOutSensor(SensorEntity):
 
     def set_custom_name(self, custom_name: str) -> None:
         self._custom_name = custom_name
-        _update_device_name(self.hass, self._portal, self._instance, custom_name)
         self.async_write_ha_state()
 
     @callback
@@ -411,4 +414,4 @@ def _slug(text: str) -> str:
                 out.append("_")
                 prev_us = True
     s = "".join(out).strip("_")
-    return s or "gx"
+    return s or "home"
