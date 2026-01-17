@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -35,6 +36,23 @@ class _Runtime:
     customname_by_instance: dict[str, str]
 
 
+def _device_ident(portal_id: str, vebus_instance: str) -> str:
+    """Stable device identity used across all VE.Bus entities."""
+    return f"{portal_id}_vebus_{vebus_instance}"
+
+
+def _update_device_name(hass: HomeAssistant, portal_id: str, vebus_instance: str, name: str) -> None:
+    """Persistently update the HA device name when CustomName arrives."""
+    reg = dr.async_get(hass)
+    ident = (DOMAIN, _device_ident(portal_id, vebus_instance))
+    dev = reg.async_get_device(identifiers={ident})
+    if dev is None:
+        return
+    # Only update if changed to avoid needless registry writes.
+    if dev.name != name:
+        reg.async_update_device(dev.id, name=name)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -59,10 +77,15 @@ async def async_setup_entry(
             inst = m_cn.group("instance")
             v = payload.get("value")
             if isinstance(v, str) and v.strip():
-                runtime.customname_by_instance[inst] = v.strip()
+                custom_name = v.strip()
+                runtime.customname_by_instance[inst] = custom_name
+
+                # Persistently update device name in registry.
+                _update_device_name(hass, portal, inst, custom_name)
+
                 ent = runtime.state_entities.get(inst)
                 if ent:
-                    ent.set_custom_name(v.strip())
+                    ent.set_custom_name(custom_name)
             return
 
         # State
@@ -76,6 +99,7 @@ async def async_setup_entry(
         ent = runtime.state_entities.get(inst)
         if ent is None:
             ent = VictronVeBusStateSensor(
+                hass=hass,
                 entry=entry,
                 cfg_name=cfg_name,
                 portal_id=portal,
@@ -91,42 +115,49 @@ async def async_setup_entry(
 
 
 class VictronVeBusStateSensor(SensorEntity):
+    """VE.Bus State / Zustand sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
+        hass: HomeAssistant,
         entry: ConfigEntry,
         cfg_name: str,
         portal_id: str,
         vebus_instance: str,
         custom_name: str | None,
     ) -> None:
+        self.hass = hass
         self._entry = entry
         self._cfg_name = cfg_name
         self._portal = portal_id
         self._instance = vebus_instance
         self._custom_name = custom_name
+        self._state_code: int | None = None
 
         dev_name = custom_name or f"VE.Bus {vebus_instance}"
         self._attr_device_info = DeviceInfo(
-            # Stable device identity: portal_id + instance
-            identifiers={(DOMAIN, f"{portal_id}_vebus_{vebus_instance}")},
+            # MUST match Select entity to merge under same HA device.
+            identifiers={(DOMAIN, _device_ident(portal_id, vebus_instance))},
             name=dev_name,
             manufacturer="Victron Energy",
             model="VE.Bus",
         )
 
-        self._attr_name = "VE-Bus State"
+        # Bilingual entity name (visible in HA UI) starting with v0.1.5-pre-6.
+        self._attr_name = "VE-Bus State / Zustand"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_state"
 
         slug_cfg = _slug(cfg_name)
         self._attr_object_id = f"ve_{slug_cfg}_vebus_{vebus_instance}_state"
 
         self._attr_native_value = None
-        self._state_code: int | None = None
 
     def set_custom_name(self, custom_name: str) -> None:
         self._custom_name = custom_name
+        # Ensure device name is persisted.
+        _update_device_name(self.hass, self._portal, self._instance, custom_name)
         self.async_write_ha_state()
 
     @callback
@@ -145,7 +176,6 @@ class VictronVeBusStateSensor(SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         if self._state_code is None:
             return {}
-
         code = self._state_code
         return {
             "code": code,
@@ -156,7 +186,7 @@ class VictronVeBusStateSensor(SensorEntity):
 
 def _slug(text: str) -> str:
     text = (text or "").strip().lower()
-    out = []
+    out: list[str] = []
     prev_us = False
     for ch in text:
         ok = ("a" <= ch <= "z") or ("0" <= ch <= "9")

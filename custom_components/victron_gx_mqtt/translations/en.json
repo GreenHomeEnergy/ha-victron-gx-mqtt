@@ -2,12 +2,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect Victron GX MQTT",
-        "description": "Enter the MQTT topic prefix (bridge prefix) and the VRM Portal ID.",
+        "title": "Connect Victron GX MQTT / Verbinden",
+        "description": "Enter the MQTT topic prefix (bridge prefix) and the VRM Portal ID. / Trage den MQTT Topic-Prefix (Bridge-Prefix) und die VRM Portal ID ein.",
         "data": {
-          "name": "Name",
-          "topic_prefix": "Topic Prefix",
-          "portal_id": "VRM Portal ID"
+          "name": "Name / Name",
+          "topic_prefix": "Topic Prefix / Topic-Prefix",
+          "portal_id": "VRM Portal ID / VRM Portal ID"
         }
       }
     }

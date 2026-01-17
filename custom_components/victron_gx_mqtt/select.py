@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -17,11 +18,11 @@ from .const import (
     CONF_NAME,
     CONF_TOPIC_PREFIX,
     CONF_PORTAL_ID,
-    VE_BUS_MODE_MAP,
     VE_BUS_MODE_MAP_DE,
     VE_BUS_MODE_MAP_EN,
-    VE_BUS_MODE_MAP_INV,
-    VE_BUS_MODE_OPTIONS,
+    VE_BUS_MODE_MAP_INV_BILINGUAL,
+    VE_BUS_MODE_MAP_INV_EN,
+    VE_BUS_MODE_OPTIONS_BILINGUAL,
 )
 
 _VEBUS_MODE_RE = re.compile(
@@ -36,6 +37,30 @@ _VEBUS_CUSTOMNAME_RE = re.compile(
 class _Runtime:
     mode_entities: dict[str, "VictronVeBusModeSelect"]
     customname_by_instance: dict[str, str]
+
+
+def _device_ident(portal_id: str, vebus_instance: str) -> str:
+    return f"{portal_id}_vebus_{vebus_instance}"
+
+
+def _update_device_name(hass: HomeAssistant, portal_id: str, vebus_instance: str, name: str) -> None:
+    reg = dr.async_get(hass)
+    ident = (DOMAIN, _device_ident(portal_id, vebus_instance))
+    dev = reg.async_get_device(identifiers={ident})
+    if dev is None:
+        return
+    if dev.name != name:
+        reg.async_update_device(dev.id, name=name)
+
+
+def _bilingual_option(code: int) -> str:
+    de = VE_BUS_MODE_MAP_DE.get(code)
+    en = VE_BUS_MODE_MAP_EN.get(code)
+    if de and en:
+        return f"{de} / {en}"
+    if en:
+        return en
+    return f"Unknown ({code})"
 
 
 async def async_setup_entry(
@@ -62,10 +87,12 @@ async def async_setup_entry(
             inst = m_cn.group("instance")
             v = payload.get("value")
             if isinstance(v, str) and v.strip():
-                runtime.customname_by_instance[inst] = v.strip()
+                custom_name = v.strip()
+                runtime.customname_by_instance[inst] = custom_name
+                _update_device_name(hass, portal, inst, custom_name)
                 ent = runtime.mode_entities.get(inst)
                 if ent:
-                    ent.set_custom_name(v.strip())
+                    ent.set_custom_name(custom_name)
             return
 
         # Mode
@@ -96,8 +123,10 @@ async def async_setup_entry(
 
 
 class VictronVeBusModeSelect(SelectEntity):
+    """VE.Bus Mode / Modus select."""
+
     _attr_has_entity_name = True
-    _attr_options = VE_BUS_MODE_OPTIONS
+    _attr_options = VE_BUS_MODE_OPTIONS_BILINGUAL
 
     def __init__(
         self,
@@ -115,20 +144,21 @@ class VictronVeBusModeSelect(SelectEntity):
         self._prefix = topic_prefix
         self._portal = portal_id
         self._instance = vebus_instance
+        self._custom_name = custom_name
 
         self._mode_code: int | None = None
-        self._custom_name = custom_name
 
         dev_name = custom_name or f"VE.Bus {vebus_instance}"
         self._attr_device_info = DeviceInfo(
-            # MUST match the State sensor device identifiers (same device in HA)
-            identifiers={(DOMAIN, f"{portal_id}_vebus_{vebus_instance}")},
+            # MUST match sensor identifiers for proper device merge.
+            identifiers={(DOMAIN, _device_ident(portal_id, vebus_instance))},
             name=dev_name,
             manufacturer="Victron Energy",
             model="VE.Bus",
         )
 
-        self._attr_name = "VE-Bus Mode"
+        # Bilingual entity name (visible in HA UI) starting with v0.1.5-pre-6.
+        self._attr_name = "VE-Bus Mode / Modus"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_mode"
 
         slug_cfg = _slug(cfg_name)
@@ -138,6 +168,7 @@ class VictronVeBusModeSelect(SelectEntity):
 
     def set_custom_name(self, custom_name: str) -> None:
         self._custom_name = custom_name
+        _update_device_name(self.hass, self._portal, self._instance, custom_name)
         self.async_write_ha_state()
 
     @callback
@@ -149,14 +180,13 @@ class VictronVeBusModeSelect(SelectEntity):
             return
 
         self._mode_code = value
-        self._attr_current_option = VE_BUS_MODE_MAP.get(value, f"Unknown ({value})")
+        self._attr_current_option = _bilingual_option(value)
         self.async_write_ha_state()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         if self._mode_code is None:
             return {}
-
         code = self._mode_code
         return {
             "code": code,
@@ -165,23 +195,27 @@ class VictronVeBusModeSelect(SelectEntity):
         }
 
     async def async_select_option(self, option: str) -> None:
-        if option not in VE_BUS_MODE_MAP_INV:
+        # Accept bilingual options (UI) and English options (service calls).
+        if option in VE_BUS_MODE_MAP_INV_BILINGUAL:
+            value = VE_BUS_MODE_MAP_INV_BILINGUAL[option]
+        elif option in VE_BUS_MODE_MAP_INV_EN:
+            value = VE_BUS_MODE_MAP_INV_EN[option]
+        else:
             return
 
-        value = VE_BUS_MODE_MAP_INV[option]
         write_topic = f"{self._prefix}/W/{self._portal}/vebus/{self._instance}/Mode"
         payload = f'{{"value": {value}}}'
         await mqtt.async_publish(self.hass, write_topic, payload=payload, qos=0, retain=False)
 
-        # Optimistisch setzen (inkl. code für zweisprachige Attribute)
-        self._attr_current_option = option
+        # Optimistic update.
         self._mode_code = value
+        self._attr_current_option = _bilingual_option(value)
         self.async_write_ha_state()
 
 
 def _slug(text: str) -> str:
     text = (text or "").strip().lower()
-    out = []
+    out: list[str] = []
     prev_us = False
     for ch in text:
         ok = ("a" <= ch <= "z") or ("0" <= ch <= "9")
