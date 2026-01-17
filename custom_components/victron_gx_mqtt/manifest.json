@@ -1,12 +1,12 @@
 {
   "domain": "victron_gx_mqtt",
   "name": "Victron GX MQTT",
-  "codeowners": [],
+  "version": "0.1.4-pre-5",
   "config_flow": true,
   "documentation": "https://github.com/GreenHomeEnergy/ha-victron-gx-mqtt",
   "issue_tracker": "https://github.com/GreenHomeEnergy/ha-victron-gx-mqtt/issues",
+  "dependencies": ["mqtt"],
+  "codeowners": ["@GreenHomeEnergy"],
   "integration_type": "hub",
-  "iot_class": "local_push",
-  "requirements": [],
-  "version": "0.1.3-pre-4"
+  "iot_class": "local_push"
 }
