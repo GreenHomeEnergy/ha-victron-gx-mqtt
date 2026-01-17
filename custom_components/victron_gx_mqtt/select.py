@@ -17,7 +17,9 @@ from .const import (
     CONF_NAME,
     CONF_TOPIC_PREFIX,
     CONF_PORTAL_ID,
-    VE_BUS_MODE_MAP,
+    VE_BUS_MODE_MAP,         # EN primary
+    VE_BUS_MODE_MAP_DE,
+    VE_BUS_MODE_MAP_EN,
     VE_BUS_MODE_MAP_INV,
     VE_BUS_MODE_OPTIONS,
 )
@@ -94,6 +96,14 @@ async def async_setup_entry(
 
 
 class VictronVeBusModeSelect(SelectEntity):
+    """
+    VE.Bus Mode Select.
+
+    Project-wide rule:
+    - core state/options remain EN (stable for automations)
+    - always provide bilingual attributes (DE/EN) + numeric code
+    """
+
     _attr_has_entity_name = True
     _attr_options = VE_BUS_MODE_OPTIONS
 
@@ -114,6 +124,8 @@ class VictronVeBusModeSelect(SelectEntity):
         self._portal = portal_id
         self._instance = vebus_instance
 
+        self._custom_name = custom_name
+
         dev_name = custom_name or f"VE.Bus {vebus_instance}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_vebus_{vebus_instance}")},
@@ -128,9 +140,12 @@ class VictronVeBusModeSelect(SelectEntity):
         slug_cfg = _slug(cfg_name)
         self._attr_object_id = f"ve_{slug_cfg}_ve_bus_mode"
 
-        self._attr_current_option = None
+        self._attr_current_option: str | None = None
+        self._mode_code: int | None = None
 
     def set_custom_name(self, custom_name: str) -> None:
+        # Keep existing behavior; device name may update via registry/HA UI refresh.
+        self._custom_name = custom_name
         self.async_write_ha_state()
 
     @callback
@@ -141,10 +156,26 @@ class VictronVeBusModeSelect(SelectEntity):
         if not isinstance(value, int):
             return
 
+        self._mode_code = value
+
+        # Stable select option in EN (automation-safe)
         self._attr_current_option = VE_BUS_MODE_MAP.get(value, f"Unknown ({value})")
         self.async_write_ha_state()
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if self._mode_code is None:
+            return {}
+
+        code = self._mode_code
+        return {
+            "code": code,
+            "mode_en": VE_BUS_MODE_MAP_EN.get(code, f"Unknown ({code})"),
+            "mode_de": VE_BUS_MODE_MAP_DE.get(code, f"Unbekannt ({code})"),
+        }
+
     async def async_select_option(self, option: str) -> None:
+        # Option is expected to be EN option (stable)
         if option not in VE_BUS_MODE_MAP_INV:
             return
 
@@ -153,8 +184,9 @@ class VictronVeBusModeSelect(SelectEntity):
         payload = f'{{"value": {value}}}'
         await mqtt.async_publish(self.hass, write_topic, payload=payload, qos=0, retain=False)
 
-        # Optimistisch setzen
+        # Optimistic update + code tracking consistent with bilingual attributes
         self._attr_current_option = option
+        self._mode_code = value
         self.async_write_ha_state()
 
 
