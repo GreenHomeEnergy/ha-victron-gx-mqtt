@@ -115,7 +115,7 @@ async def async_setup_entry(
 
 
 class VictronVeBusStateSensor(SensorEntity):
-    """VE.Bus State sensor."""
+    """VE.Bus State / Zustand sensor."""
 
     _attr_has_entity_name = True
 
@@ -145,12 +145,15 @@ class VictronVeBusStateSensor(SensorEntity):
             model="VE.Bus",
         )
 
-        # Keep entity name concise; bilingual labels are exposed via attributes.
+        # Bilingual entity name (visible in HA UI) starting with v0.1.5-pre-6.
         self._attr_name = "VE-Bus State"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_state"
 
+        # Entity ID / object_id convention:
+        # <cfg_name> + <subtopic> + <endpoint>
+        # Example: sensor.ve_base_ve_bus_state
         slug_cfg = _slug(cfg_name)
-        self._attr_object_id = f"ve_{slug_cfg}_vebus_{vebus_instance}_state"
+        self._attr_object_id = f"{slug_cfg}_ve_bus_state"
 
         self._attr_native_value = None
 
