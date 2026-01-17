@@ -20,6 +20,9 @@ from .const import (
     CONF_PORTAL_ID,
     VE_BUS_MODE_MAP_DE,
     VE_BUS_MODE_MAP_EN,
+    VE_BUS_MODE_MAP_INV_BILINGUAL,
+    VE_BUS_MODE_MAP_INV_EN,
+    VE_BUS_MODE_OPTIONS,
 )
 
 _VEBUS_MODE_RE = re.compile(
@@ -50,14 +53,13 @@ def _update_device_name(hass: HomeAssistant, portal_id: str, vebus_instance: str
         reg.async_update_device(dev.id, name=name)
 
 
-def _bilingual_option(code: int) -> str:
-    de = VE_BUS_MODE_MAP_DE.get(code)
-    en = VE_BUS_MODE_MAP_EN.get(code)
-    if de and en:
-        return en
-    if en:
-        return en
-    return f"Unknown ({code})"
+def _option_label(code: int) -> str:
+    """Return the primary (stable) label shown in HA for Mode.
+
+    We keep the visible option labels English to avoid awkward bilingual strings
+    in the select dropdown while still exposing DE/EN in attributes.
+    """
+    return VE_BUS_MODE_MAP_EN.get(code, f"Unknown ({code})")
 
 
 async def async_setup_entry(
@@ -154,7 +156,7 @@ class VictronVeBusModeSelect(SelectEntity):
             model="VE.Bus",
         )
 
-        # Bilingual entity name (visible in HA UI) starting with v0.1.5-pre-6.
+        # Keep entity name concise; bilingual labels are exposed via attributes.
         self._attr_name = "VE-Bus Mode"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_mode"
 
@@ -177,7 +179,7 @@ class VictronVeBusModeSelect(SelectEntity):
             return
 
         self._mode_code = value
-        self._attr_current_option = VE_BUS_MODE_MAP_EN.get(value, f"Unknown ({value})")
+        self._attr_current_option = _option_label(value)
         self.async_write_ha_state()
 
     @property
@@ -192,9 +194,11 @@ class VictronVeBusModeSelect(SelectEntity):
         }
 
     async def async_select_option(self, option: str) -> None:
-        # Accept bilingual options (UI) and English options (service calls).
-        if option in VE_BUS_MODE_MAP_INV:
-            value = VE_BUS_MODE_MAP_INV[option]
+        # Accept English options (UI/service calls) and legacy bilingual options.
+        if option in VE_BUS_MODE_MAP_INV_BILINGUAL:
+            value = VE_BUS_MODE_MAP_INV_BILINGUAL[option]
+        elif option in VE_BUS_MODE_MAP_INV_EN:
+            value = VE_BUS_MODE_MAP_INV_EN[option]
         else:
             return
 
@@ -204,7 +208,7 @@ class VictronVeBusModeSelect(SelectEntity):
 
         # Optimistic update.
         self._mode_code = value
-        self._attr_current_option = VE_BUS_MODE_MAP_EN.get(value, f"Unknown ({value})")
+        self._attr_current_option = _option_label(value)
         self.async_write_ha_state()
 
 
