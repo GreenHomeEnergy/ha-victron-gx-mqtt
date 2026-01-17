@@ -16,6 +16,9 @@ PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.SELECT]
 # ----------------------------
 # VE.Bus State mapping (Sensor)
 # ----------------------------
+# Vorgabe:
+# 0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;
+# 8=Passthru;9=Inverting;10=Power assist;11=Power supply;244=Sustain;252=External control
 
 VE_BUS_STATE_MAP_EN: Final[dict[int, str]] = {
     0: "Off",
@@ -51,13 +54,17 @@ VE_BUS_STATE_MAP_DE: Final[dict[int, str]] = {
     252: "Externe Steuerung",
 }
 
-# Backward-compatible default (English) used as primary state value
+# Primary value for the sensor is English (stable for automations)
 VE_BUS_STATE_MAP: Final[dict[int, str]] = VE_BUS_STATE_MAP_EN
 
 # ----------------------------
 # VE.Bus Mode mapping (Select)
 # ----------------------------
-# Vorgabe: 1=Charger Only; 2=Inverter Only; 3=On; 4=Off
+# Vorgabe:
+#  1 = Charger Only
+#  2 = Inverter Only
+#  3 = On
+#  4 = Off
 
 VE_BUS_MODE_MAP_EN: Final[dict[int, str]] = {
     1: "Charger Only",
@@ -73,7 +80,7 @@ VE_BUS_MODE_MAP_DE: Final[dict[int, str]] = {
     4: "Aus",
 }
 
-# Primary (automation-safe) options remain English
+# Primary value for the select is English (stable for automations)
 VE_BUS_MODE_MAP: Final[dict[int, str]] = VE_BUS_MODE_MAP_EN
 
 VE_BUS_MODE_OPTIONS: Final[list[str]] = [
