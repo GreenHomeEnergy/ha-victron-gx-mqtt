@@ -1,7 +1,7 @@
 {
   "domain": "victron_gx_mqtt",
   "name": "Victron GX MQTT",
-  "version": "0.1.1-pre-2",
+  "version": "0.1.2-pre-3",
   "documentation": "https://github.com/GreenHomeEnergy/ha-victron-gx-mqtt",
   "issue_tracker": "https://github.com/GreenHomeEnergy/ha-victron-gx-mqtt/issues",
   "codeowners": ["@GreenHomeEnergy"],
