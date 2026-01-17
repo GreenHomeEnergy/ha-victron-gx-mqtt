@@ -76,7 +76,10 @@ VE_BUS_MODE_MAP_DE: Final[dict[int, str]] = {
     4: "Aus",
 }
 
-# Select options shown in the UI remain English (stable for automations).
+# Select primary option value remains English (stable for automations).
+VE_BUS_MODE_MAP: Final[dict[int, str]] = VE_BUS_MODE_MAP_EN
+
+# UI options: English only for v0.1.5-pre-6 (German is exposed via attributes).
 VE_BUS_MODE_OPTIONS: Final[list[str]] = [
     VE_BUS_MODE_MAP_EN[1],
     VE_BUS_MODE_MAP_EN[2],
@@ -84,6 +87,7 @@ VE_BUS_MODE_OPTIONS: Final[list[str]] = [
     VE_BUS_MODE_MAP_EN[4],
 ]
 
+# Option -> code mapping (English labels).
 VE_BUS_MODE_MAP_INV: Final[dict[str, int]] = {v: k for k, v in VE_BUS_MODE_MAP_EN.items()}
 
 
