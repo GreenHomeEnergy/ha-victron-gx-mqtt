@@ -76,27 +76,15 @@ VE_BUS_MODE_MAP_DE: Final[dict[int, str]] = {
     4: "Aus",
 }
 
-# Select primary option value remains English (stable for automations). German is shown in UI via bilingual labels.
-VE_BUS_MODE_MAP: Final[dict[int, str]] = VE_BUS_MODE_MAP_EN
-
-# UI options: bilingual, to satisfy "everything visible is bilingual" starting with v0.1.5-pre-6.
-VE_BUS_MODE_OPTIONS_BILINGUAL: Final[list[str]] = [
-    f"{VE_BUS_MODE_MAP_DE[1]} / {VE_BUS_MODE_MAP_EN[1]}",
-    f"{VE_BUS_MODE_MAP_DE[2]} / {VE_BUS_MODE_MAP_EN[2]}",
-    f"{VE_BUS_MODE_MAP_DE[3]} / {VE_BUS_MODE_MAP_EN[3]}",
-    f"{VE_BUS_MODE_MAP_DE[4]} / {VE_BUS_MODE_MAP_EN[4]}",
+# Select options shown in the UI remain English (stable for automations).
+VE_BUS_MODE_OPTIONS: Final[list[str]] = [
+    VE_BUS_MODE_MAP_EN[1],
+    VE_BUS_MODE_MAP_EN[2],
+    VE_BUS_MODE_MAP_EN[3],
+    VE_BUS_MODE_MAP_EN[4],
 ]
 
-# For service calls / automations we keep accepting the EN labels as well.
-VE_BUS_MODE_MAP_INV_EN: Final[dict[str, int]] = {v: k for k, v in VE_BUS_MODE_MAP_EN.items()}
-
-# Bilingual option -> code mapping
-VE_BUS_MODE_MAP_INV_BILINGUAL: Final[dict[str, int]] = {
-    VE_BUS_MODE_OPTIONS_BILINGUAL[0]: 1,
-    VE_BUS_MODE_OPTIONS_BILINGUAL[1]: 2,
-    VE_BUS_MODE_OPTIONS_BILINGUAL[2]: 3,
-    VE_BUS_MODE_OPTIONS_BILINGUAL[3]: 4,
-}
+VE_BUS_MODE_MAP_INV: Final[dict[str, int]] = {v: k for k, v in VE_BUS_MODE_MAP_EN.items()}
 
 
 @dataclass(frozen=True)

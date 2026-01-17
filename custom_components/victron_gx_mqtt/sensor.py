@@ -146,7 +146,7 @@ class VictronVeBusStateSensor(SensorEntity):
         )
 
         # Bilingual entity name (visible in HA UI) starting with v0.1.5-pre-6.
-        self._attr_name = "VE-Bus State / Zustand"
+        self._attr_name = "VE-Bus State"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_state"
 
         slug_cfg = _slug(cfg_name)
