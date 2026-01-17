@@ -17,6 +17,8 @@ from .const import (
     CONF_TOPIC_PREFIX,
     CONF_PORTAL_ID,
     VE_BUS_STATE_MAP,
+    VE_BUS_STATE_MAP_DE,
+    VE_BUS_STATE_MAP_EN,
 )
 
 _VEBUS_STATE_RE = re.compile(
@@ -76,6 +78,7 @@ async def async_setup_entry(
             ent = VictronVeBusStateSensor(
                 entry=entry,
                 cfg_name=cfg_name,
+                portal_id=portal,
                 vebus_instance=inst,
                 custom_name=runtime.customname_by_instance.get(inst),
             )
@@ -94,17 +97,20 @@ class VictronVeBusStateSensor(SensorEntity):
         self,
         entry: ConfigEntry,
         cfg_name: str,
+        portal_id: str,
         vebus_instance: str,
         custom_name: str | None,
     ) -> None:
         self._entry = entry
         self._cfg_name = cfg_name
+        self._portal = portal_id
         self._instance = vebus_instance
         self._custom_name = custom_name
 
         dev_name = custom_name or f"VE.Bus {vebus_instance}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_vebus_{vebus_instance}")},
+            # Stable device identity: portal_id + instance
+            identifiers={(DOMAIN, f"{portal_id}_vebus_{vebus_instance}")},
             name=dev_name,
             manufacturer="Victron Energy",
             model="VE.Bus",
@@ -114,9 +120,10 @@ class VictronVeBusStateSensor(SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_state"
 
         slug_cfg = _slug(cfg_name)
-        self._attr_object_id = f"ve_{slug_cfg}_ve_bus_state"
+        self._attr_object_id = f"ve_{slug_cfg}_vebus_{vebus_instance}_state"
 
         self._attr_native_value = None
+        self._state_code: int | None = None
 
     def set_custom_name(self, custom_name: str) -> None:
         self._custom_name = custom_name
@@ -130,8 +137,21 @@ class VictronVeBusStateSensor(SensorEntity):
         if not isinstance(value, int):
             return
 
+        self._state_code = value
         self._attr_native_value = VE_BUS_STATE_MAP.get(value, f"Unknown ({value})")
         self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if self._state_code is None:
+            return {}
+
+        code = self._state_code
+        return {
+            "code": code,
+            "state_en": VE_BUS_STATE_MAP_EN.get(code, f"Unknown ({code})"),
+            "state_de": VE_BUS_STATE_MAP_DE.get(code, f"Unbekannt ({code})"),
+        }
 
 
 def _slug(text: str) -> str:
