@@ -1,26 +1,15 @@
 {
-  "title": "Victron GX MQTT",
   "config": {
     "step": {
       "user": {
         "title": "Victron GX MQTT verbinden",
-        "description": "Trage den MQTT Topic Prefix aus deiner Mosquitto-Bridge und die VRM Portal ID deines GX Systems ein.",
+        "description": "Trage den MQTT Topic Prefix aus deiner Mosquitto-Bridge und die VRM Portal ID ein.",
         "data": {
           "name": "Name",
           "topic_prefix": "Topic Prefix",
           "portal_id": "VRM Portal ID"
         }
-      },
-      "services": {
-        "title": "Auswahl anlegen",
-        "description": "Wähle, welche Service-Gruppen die Integration anlegen soll. In diesem Pre-Release ist nur VE.Bus (Basis) umgesetzt.",
-        "data": {
-          "selected_services": "Service-Gruppen"
-        }
       }
-    },
-    "error": {
-      "required": "Pflichtfeld."
     }
   }
 }
