@@ -7,30 +7,28 @@ from homeassistant.const import Platform
 
 DOMAIN: Final = "victron_gx_mqtt"
 
-# ---- Config keys (ConfigFlow / entry.data) ----
 CONF_NAME: Final = "name"
 CONF_TOPIC_PREFIX: Final = "topic_prefix"
 CONF_PORTAL_ID: Final = "portal_id"
 
-# ---- Dispatcher signals ----
-# IMPORTANT:
-# Dein MQTT-Listener/Client muss bei jeder eingehenden Nachricht folgendes dispatchen:
-# async_dispatcher_send(hass, SIGNAL_VICTRON_MQTT_MESSAGE, topic, payload_dict)
-SIGNAL_VICTRON_MQTT_MESSAGE: Final = f"{DOMAIN}_mqtt_message"
+PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.SELECT]
 
-# ---- Platforms ----
-PLATFORMS: Final[list[Platform]] = [
-    Platform.SENSOR,
-    Platform.SELECT,  # v0.1.3-pre-4: VE.Bus Mode als SelectEntity
-]
+# VE.Bus State mapping (Ausbau möglich; hier die üblichen Zustände)
+VE_BUS_STATE_MAP: Final[dict[int, str]] = {
+    0: "Off",
+    1: "Low Power",
+    2: "Fault",
+    3: "Bulk",
+    4: "Absorption",
+    5: "Float",
+    6: "Storage",
+    7: "Equalize",
+    8: "Passthru",
+    9: "Inverting",
+    10: "Power Assist",
+}
 
-# ---- VE.Bus mappings ----
-# Victron VE.Bus "Mode" ist typischerweise:
-# 0 = Off
-# 1 = Charger Only
-# 2 = Inverter Only
-# 3 = On
-# (Falls dein System weitere Werte liefert, werden sie als "Unknown (<n>)" angezeigt.)
+# VE.Bus Mode mapping (writeable)
 VE_BUS_MODE_MAP: Final[dict[int, str]] = {
     0: "Off",
     1: "Charger Only",
