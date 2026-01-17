@@ -9,8 +9,8 @@ from homeassistant.components import mqtt
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -25,34 +25,33 @@ from .const import (
 _VEBUS_STATE_TOPIC_RE = re.compile(r"^(.+)/N/([^/]+)/vebus/(\d+)/State$")
 _VEBUS_CUSTOMNAME_TOPIC_RE = re.compile(r"^(.+)/N/([^/]+)/vebus/(\d+)/CustomName$")
 
-# Based on Victron GUI SystemState mapping (commonly used for VE.Bus state display)
-# Source: Victron community archive (SystemState.qml mapping) :contentReference[oaicite:1]{index=1}
+# VE.Bus / System state mapping used in Victron UI (common mapping)
+# Unknown codes will be shown as "Unknown (<code>)"
 VEBUS_STATE_TEXT: dict[int, str] = {
-    0x00: "Off",
-    0x01: "AES mode",
-    0x02: "Fault",
-    0x03: "Bulk",
-    0x04: "Absorption",
-    0x05: "Float",
-    0x06: "Storage",
-    0x07: "Equalize",
-    0x08: "Passthru",
-    0x09: "Inverting",
-    0x0A: "Assisting",
-    0x0B: "Power Supply",
-    0xF5: "Wakeup",
-    0xF6: "Rep. Absorption",
-    0xF7: "Equalize",
-    0xF8: "Battery Safe",
-    0xF9: "Test",
-    0xFA: "Blocked",
-    0xFB: "Test",
-    0xFC: "Ext. control",
-    # ESS related system states (sometimes shown in VE.Bus context)
-    0x100: "Discharging",
-    0x101: "Sustain",
-    0x102: "Recharge",
-    0x103: "Scheduled",
+    0: "Off",
+    1: "AES mode",
+    2: "Fault",
+    3: "Bulk",
+    4: "Absorption",
+    5: "Float",
+    6: "Storage",
+    7: "Equalize",
+    8: "Passthru",
+    9: "Inverting",
+    10: "Assisting",
+    11: "Power Supply",
+    245: "Wakeup",
+    246: "Rep. Absorption",
+    247: "Equalize",
+    248: "Battery Safe",
+    249: "Test",
+    250: "Blocked",
+    251: "Test",
+    252: "Ext. control",
+    256: "Discharging",
+    257: "Sustain",
+    258: "Recharge",
+    259: "Scheduled",
 }
 
 
@@ -111,7 +110,7 @@ class VeBusStateSensor(SensorEntity):
 
         self._attr_unique_id = f"{entry.entry_id}_vebus_state"
 
-        # Initial device info (we will rename the device once CustomName arrives)
+        # One HA device per configured GX entry; we will rename it once CustomName arrives
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=f"Victron GX ({cfg.name})",
@@ -119,7 +118,7 @@ class VeBusStateSensor(SensorEntity):
             model="GX (Cerbo/Venus OS)",
         )
 
-        # Optional: advertise known enum options (helps UI)
+        # Advertise known enum options (helps UI)
         self._attr_options = sorted(set(VEBUS_STATE_TEXT.values()))
 
     @property
@@ -210,14 +209,14 @@ class VeBusStateSensor(SensorEntity):
 
         instance = m.group(3)
 
-        # If we already locked onto a VE.Bus instance via State, only accept matching CustomName.
+        # If we already have an instance from State, only accept matching CustomName
         if self._device_instance is not None and instance != self._device_instance:
             return
 
         self._device_instance = instance
         self._custom_name = name_val.strip()
 
-        # Update the HA Device name to the Victron CustomName
+        # Update device name in registry to CustomName
         device_reg = dr.async_get(self.hass)
         device = device_reg.async_get_device(identifiers={(DOMAIN, self.entry.entry_id)})
         if device is not None:
