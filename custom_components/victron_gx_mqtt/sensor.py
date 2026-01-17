@@ -25,8 +25,17 @@ from .const import (
 _VEBUS_STATE_TOPIC_RE = re.compile(r"^(.+)/N/([^/]+)/vebus/(\d+)/State$")
 _VEBUS_CUSTOMNAME_TOPIC_RE = re.compile(r"^(.+)/N/([^/]+)/vebus/(\d+)/CustomName$")
 
-# VE.Bus / System state mapping used in Victron UI (common mapping)
-# Unknown codes will be shown as "Unknown (<code>)"
+
+def _slugify_config_name(name: str) -> str:
+    """Create a stable HA-friendly slug from the config 'Name' field."""
+    s = (name or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "victron"
+
+
+# VE.Bus / system state mapping (common Victron UI mapping).
+# Unknown codes will be shown as "Unknown (<code>)".
 VEBUS_STATE_TEXT: dict[int, str] = {
     0: "Off",
     1: "AES mode",
@@ -57,9 +66,9 @@ VEBUS_STATE_TEXT: dict[int, str] = {
 
 @dataclass(frozen=True)
 class VictronBaseConfig:
-    name: str
-    topic_prefix: str
-    portal_id: str
+    name: str           # Config name (used for entity_id prefix)
+    topic_prefix: str   # Technical only (bridge prefix)
+    portal_id: str      # Technical only (VRM Portal ID)
 
 
 async def async_setup_entry(
@@ -87,7 +96,7 @@ class VeBusStateSensor(SensorEntity):
     """VE.Bus State from Victron dbus-flashmq MQTT notifications."""
 
     _attr_has_entity_name = True
-    _attr_name = "VE.Bus State"
+    _attr_name = "VE-Bus State"
     _attr_icon = "mdi:transmission-tower"
     _attr_device_class = SensorDeviceClass.ENUM
 
@@ -108,12 +117,14 @@ class VeBusStateSensor(SensorEntity):
         self._last_state_topic: str | None = None
         self._last_customname_topic: str | None = None
 
-        self._attr_unique_id = f"{entry.entry_id}_vebus_state"
+        # Entity-ID prefix MUST come from config name (not topic prefix)
+        cfg_slug = _slugify_config_name(cfg.name)
+        self._attr_unique_id = f"{cfg_slug}_ve_bus_state"
 
-        # One HA device per configured GX entry; we will rename it once CustomName arrives
+        # One HA device per configured GX entry; renamed to CustomName when available
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name=f"Victron GX ({cfg.name})",
+            name=cfg.name,  # user-defined config name for device display
             manufacturer="Victron Energy",
             model="GX (Cerbo/Venus OS)",
         )
@@ -216,7 +227,7 @@ class VeBusStateSensor(SensorEntity):
         self._device_instance = instance
         self._custom_name = name_val.strip()
 
-        # Update device name in registry to CustomName
+        # Update device name in registry to CustomName (if present)
         device_reg = dr.async_get(self.hass)
         device = device_reg.async_get_device(identifiers={(DOMAIN, self.entry.entry_id)})
         if device is not None:
