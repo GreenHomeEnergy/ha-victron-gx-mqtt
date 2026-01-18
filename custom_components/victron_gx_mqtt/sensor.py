@@ -109,14 +109,69 @@ def _update_device_name(hass: HomeAssistant, portal_id: str, vebus_instance: str
     return
 
 
+async def _migrate_entity_registry(hass: HomeAssistant, entry: ConfigEntry, cfg_slug: str) -> None:
+    """Best-effort migration of entity_ids and name overrides.
+
+    HA persists entity_id and optional name overrides in the entity registry. If previous
+    versions created entity_ids without the config-name prefix, HA will keep those ids
+    unless we migrate them. This function renames known legacy ids of the form:
+      - sensor.ve_bus_* -> sensor.<cfg_slug>_ve_bus_*
+      - select.ve_bus_* -> select.<cfg_slug>_ve_bus_*
+    and clears any registry name override so our explicit names apply.
+    """
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except Exception:
+        return
+
+    reg = er.async_get(hass)
+
+    # Only touch entries belonging to this config entry.
+    entries = [e for e in reg.entities.values() if e.config_entry_id == entry.entry_id]
+    for e in entries:
+        if not e.entity_id:
+            continue
+
+        # Clear name override (lets entity's _attr_name show).
+        if e.name is not None:
+            try:
+                reg.async_update_entity(e.entity_id, name=None)
+            except Exception:
+                pass
+
+        # Rename legacy entity_ids without cfg prefix.
+        # Example: sensor.ve_bus_ac_out_l1_current -> sensor.<cfg_slug>_ve_bus_ac_out_l1_current
+        if e.entity_id.startswith('sensor.ve_bus_'):
+            suffix = e.entity_id[len('sensor.ve_bus_'):]
+            new_eid = f"sensor.{cfg_slug}_ve_bus_{suffix}"
+        elif e.entity_id.startswith('select.ve_bus_'):
+            suffix = e.entity_id[len('select.ve_bus_'):]
+            new_eid = f"select.{cfg_slug}_ve_bus_{suffix}"
+        else:
+            continue
+
+        if new_eid == e.entity_id:
+            continue
+
+        # Avoid collisions.
+        if reg.async_get(new_eid) is not None:
+            continue
+
+        try:
+            reg.async_update_entity(e.entity_id, new_entity_id=new_eid)
+        except Exception:
+            pass
+
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    cfg_name: str = entry.data[CONF_NAME]
+    cfg_name: str = (entry.title or entry.data.get(CONF_NAME) or 'home')
     cfg_slug: str = _slug(cfg_name)
+    await _migrate_entity_registry(hass, entry, cfg_slug)
     prefix: str = entry.data[CONF_TOPIC_PREFIX]
     portal: str = entry.data[CONF_PORTAL_ID]
 

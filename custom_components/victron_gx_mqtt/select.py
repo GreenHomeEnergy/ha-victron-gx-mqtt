@@ -58,7 +58,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    cfg_name: str = entry.data[CONF_NAME]
+    cfg_name: str = (entry.title or entry.data.get(CONF_NAME) or 'home')
     cfg_slug: str = _slug(cfg_name)
     prefix: str = entry.data[CONF_TOPIC_PREFIX]
     portal: str = entry.data[CONF_PORTAL_ID]
