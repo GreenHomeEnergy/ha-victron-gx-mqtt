@@ -9,8 +9,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.components import mqtt
+from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, PLATFORMS, CONF_NAME, CONF_TOPIC_PREFIX, CONF_PORTAL_ID
+from .const import DOMAIN, PLATFORMS, CONF_NAME, CONF_TOPIC_PREFIX, CONF_PORTAL_ID, MANUFACTURER, HUB_NAME, HUB_MODEL
 
 SIGNAL_MQTT_MESSAGE = f"{DOMAIN}_mqtt_message"
 
@@ -39,33 +40,28 @@ def _slug(text: str) -> str:
 
 
 async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Best-effort migration to the fixed entity_id scheme based on the config entry name.
+    """Best-effort migration to the **fixed** VE-Bus entity_id scheme.
 
-    Project decision (repeatable naming): entity_ids are prefixed with the integration
-    instance name configured during setup (Config Entry title / CONF_NAME). Instance
-    numbers from Victron (e.g. 276) must not appear in entity_ids.
+    Project decision (repeatable naming): entity_ids are **not** prefixed with the
+    config entry name (e.g. no "ve_base" / "ve_home"). Victron instance numbers
+    (e.g. 276) must not appear in entity_ids either.
 
-    Target patterns (examples with cfg='ve_base'):
-      sensor.ve_base_ve_bus_state
-      select.ve_base_ve_bus_mode
-      sensor.ve_base_ve_bus_ac_out_l1_power
+    Target patterns:
+      sensor.ve_bus_state
+      select.ve_bus_mode
+      sensor.ve_bus_ac_out_l1_power
 
     Migration handles the common historical patterns:
-      sensor.ve_bus_276_ac_out_l1_power -> sensor.<cfg>_ve_bus_ac_out_l1_power
-      sensor.ve_bus_ac_out_l1_power     -> sensor.<cfg>_ve_bus_ac_out_l1_power
-      sensor.<oldcfg>_ve_bus_*          -> sensor.<cfg>_ve_bus_*
+      sensor.ve_bus_276_ac_out_l1_power -> sensor.ve_bus_ac_out_l1_power
+      sensor.<oldcfg>_ve_bus_*          -> sensor.ve_bus_*
     """
-
-    cfg = _slug(entry.title or entry.data.get(CONF_NAME, "home"))
 
     ent_reg = er.async_get(hass)
     entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
 
     # 1) ve_bus_<instance>_<rest>
     p_inst = re.compile(r"^(?P<domain>sensor|select)\.ve_bus_(?P<inst>\d+)_(?P<rest>.+)$")
-    # 2) ve_bus_<rest>
-    p_noinst = re.compile(r"^(?P<domain>sensor|select)\.ve_bus_(?P<rest>.+)$")
-    # 3) <oldcfg>_ve_bus_<rest>
+    # 2) <oldcfg>_ve_bus_<rest>
     p_cfg = re.compile(r"^(?P<domain>sensor|select)\.(?P<oldcfg>[a-z0-9_]+)_ve_bus_(?P<rest>.+)$")
 
     for e in entries:
@@ -73,17 +69,12 @@ async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> 
 
         m = p_inst.match(e.entity_id)
         if m:
-            new_entity_id = f"{m.group('domain')}.{cfg}_ve_bus_{m.group('rest')}"
-
-        if new_entity_id is None:
-            m = p_noinst.match(e.entity_id)
-            if m:
-                new_entity_id = f"{m.group('domain')}.{cfg}_ve_bus_{m.group('rest')}"
+            new_entity_id = f"{m.group('domain')}.ve_bus_{m.group('rest')}"
 
         if new_entity_id is None:
             m = p_cfg.match(e.entity_id)
-            if m and m.group("oldcfg") != cfg:
-                new_entity_id = f"{m.group('domain')}.{cfg}_ve_bus_{m.group('rest')}"
+            if m:
+                new_entity_id = f"{m.group('domain')}.ve_bus_{m.group('rest')}"
 
         if not new_entity_id or new_entity_id == e.entity_id:
             continue
@@ -107,9 +98,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     prefix: str = entry.data[CONF_TOPIC_PREFIX]
     portal: str = entry.data[CONF_PORTAL_ID]
 
+    # Create a single HA device representing the Victron GX (Cerbo GX / Venus OS).
+    # All VE-Bus entities are attached to this device (no separate VE-Bus device).
+    dev_reg = dr.async_get(hass)
+    hub_ident = f"{portal}_cerbo_gx"
+    dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, hub_ident)},
+        manufacturer=MANUFACTURER,
+        model=HUB_MODEL,
+        name=HUB_NAME,
+    )
+
     subscribe_topic = f"{prefix}/N/{portal}/#"
 
-    # Best-effort entity_id migration (enforces <cfg>_ve_bus_* naming)
+    # Best-effort entity_id migration (enforces ve_bus_* naming)
     await _async_migrate_entity_ids(hass, entry)
 
     @callback
