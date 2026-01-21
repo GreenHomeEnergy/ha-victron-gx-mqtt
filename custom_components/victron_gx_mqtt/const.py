@@ -7,6 +7,14 @@ from homeassistant.const import Platform
 
 DOMAIN: Final = "victron_gx_mqtt"
 
+# Vendor information (used for DeviceInfo)
+MANUFACTURER: Final = "Victron Energy"
+
+# Hub device (Cerbo GX / Venus OS). This device is created once per config entry
+# and used as the parent for subsystem devices (e.g. VE-Bus) via `via_device`.
+HUB_NAME: Final = "Cerbo GX"
+HUB_MODEL: Final = "Cerbo GX"
+
 CONF_NAME: Final = "name"
 CONF_TOPIC_PREFIX: Final = "topic_prefix"
 CONF_PORTAL_ID: Final = "portal_id"

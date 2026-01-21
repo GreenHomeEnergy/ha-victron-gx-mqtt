@@ -18,10 +18,13 @@ from .const import (
     CONF_NAME,
     CONF_TOPIC_PREFIX,
     CONF_PORTAL_ID,
+    MANUFACTURER,
+    HUB_NAME,
+    HUB_MODEL,
     VE_BUS_MODE_MAP_DE,
     VE_BUS_MODE_MAP_EN,
     VE_BUS_MODE_MAP_INV,
-    VE_BUS_MODE_OPTIONS,    VE_BUS_DEVICE_NAME,
+    VE_BUS_MODE_OPTIONS,
 )
 
 _VEBUS_MODE_RE = re.compile(
@@ -143,24 +146,20 @@ class VictronVeBusModeSelect(SelectEntity):
 
         self._mode_code: int | None = None
 
-        dev_name = VE_BUS_DEVICE_NAME
+        # Attach to the single Victron GX device (Cerbo GX).
         self._attr_device_info = DeviceInfo(
-            # MUST match sensor identifiers for proper device merge.
-            identifiers={(DOMAIN, _device_ident(portal_id, vebus_instance))},
-            name=dev_name,
-            manufacturer="Victron Energy",
-            model="VE.Bus",
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
         )
 
         # Entity name (UI). Keep single-language; DE/EN mappings are exposed via attributes.
         self._attr_name = "VE-Bus Mode"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_mode"
 
-        # Entity-ID convention (object_id): prefixed with integration instance name
-        # (created during integration setup). Victron instance numbers must not
-        # appear in entity_ids.
-        # Example: select.ve_base_ve_bus_mode
-        self._attr_object_id = f"{self._cfg_slug}_ve_bus_mode"
+        # Suggested entity_id (object_id). Includes config slug, but no instance number.
+        self._attr_suggested_object_id = f"{cfg_slug}_ve_bus_mode"
 
         self._attr_current_option = None
 

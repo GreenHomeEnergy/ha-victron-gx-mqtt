@@ -24,10 +24,12 @@ from .const import (
     CONF_NAME,
     CONF_TOPIC_PREFIX,
     CONF_PORTAL_ID,
+    MANUFACTURER,
+    HUB_NAME,
+    HUB_MODEL,
     VE_BUS_STATE_MAP,
     VE_BUS_STATE_MAP_DE,
     VE_BUS_STATE_MAP_EN,
-    VE_BUS_DEVICE_NAME,
 )
 
 _VEBUS_STATE_RE = re.compile(
@@ -99,25 +101,24 @@ class _Runtime:
     customname_by_instance: dict[str, str]
 
 
-def _device_ident(portal_id: str, vebus_instance: str) -> str:
-    """Stable device identity used across all VE.Bus entities."""
-    return f"{portal_id}_vebus_{vebus_instance}"
+async def _migrate_entity_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Best-effort migration for the **repeatable** VE-Bus entity_id scheme.
 
+    Project decision (repeatable naming): entity_ids MUST be prefixed with the
+    *config entry name slug* (e.g. "ve_base") and MUST NOT contain Victron
+    instance numbers (e.g. 276).
 
-def _update_device_name(hass: HomeAssistant, portal_id: str, vebus_instance: str, name: str) -> None:
-    """CustomName is intentionally not used for the HA device name (fixed naming)."""
-    return
+    Target patterns:
+      - sensor.<cfg_slug>_ve_bus_state
+      - select.<cfg_slug>_ve_bus_mode
+      - sensor.<cfg_slug>_ve_bus_ac_out_l1_power
 
+    We migrate historical patterns like:
+      - sensor.ve_bus_276_ac_out_l1_power   -> sensor.<cfg_slug>_ve_bus_ac_out_l1_power
+      - sensor.ve_bus_ac_out_l1_power       -> sensor.<cfg_slug>_ve_bus_ac_out_l1_power
+      - sensor.<oldcfg>_ve_bus_ac_out_l1_*  -> sensor.<cfg_slug>_ve_bus_ac_out_l1_*
 
-async def _migrate_entity_registry(hass: HomeAssistant, entry: ConfigEntry, cfg_slug: str) -> None:
-    """Best-effort migration of entity_ids and name overrides.
-
-    HA persists entity_id and optional name overrides in the entity registry. If previous
-    versions created entity_ids without the config-name prefix, HA will keep those ids
-    unless we migrate them. This function renames known legacy ids of the form:
-      - sensor.ve_bus_* -> sensor.<cfg_slug>_ve_bus_*
-      - select.ve_bus_* -> select.<cfg_slug>_ve_bus_*
-    and clears any registry name override so our explicit names apply.
+    We also clear any registry name override so our explicit `_attr_name` is shown.
     """
     try:
         from homeassistant.helpers import entity_registry as er
@@ -126,8 +127,29 @@ async def _migrate_entity_registry(hass: HomeAssistant, entry: ConfigEntry, cfg_
 
     reg = er.async_get(hass)
 
-    # Only touch entries belonging to this config entry.
-    entries = [e for e in reg.entities.values() if e.config_entry_id == entry.entry_id]
+    cfg_name = (entry.title or "").strip() or (entry.data.get(CONF_NAME) if hasattr(entry, "data") else None) or "ve"
+    cfg_slug = re.sub(r"[^a-z0-9_]+", "_", cfg_name.lower()).strip("_")
+    if not cfg_slug:
+        cfg_slug = "ve"
+
+    # IMPORTANT:
+    # We purposely migrate **all** entities owned by this integration platform
+    # (platform == DOMAIN), not only those bound to the current config_entry_id.
+    # Reason: when a config entry is removed and later re-created, Home Assistant
+    # may re-use existing registry entries by unique_id. In that case those
+    # entries might still carry an older config_entry_id, and the repeatable
+    # naming migration would be skipped if we filtered by entry.entry_id.
+    entries = [
+        e
+        for e in reg.entities.values()
+        if getattr(e, "platform", None) == DOMAIN and e.domain in ("sensor", "select")
+    ]
+
+    # Historical patterns
+    p_inst = re.compile(r"^(?P<domain>sensor|select)\.ve_bus_(?P<inst>\d+)_(?P<rest>.+)$")
+    p_plain = re.compile(r"^(?P<domain>sensor|select)\.ve_bus_(?P<rest>.+)$")
+    p_cfg = re.compile(r"^(?P<domain>sensor|select)\.(?P<cfg>[a-z0-9_]+)_ve_bus_(?P<rest>.+)$")
+
     for e in entries:
         if not e.entity_id:
             continue
@@ -139,15 +161,23 @@ async def _migrate_entity_registry(hass: HomeAssistant, entry: ConfigEntry, cfg_
             except Exception:
                 pass
 
-        # Rename legacy entity_ids without cfg prefix.
-        # Example: sensor.ve_bus_ac_out_l1_current -> sensor.<cfg_slug>_ve_bus_ac_out_l1_current
-        if e.entity_id.startswith('sensor.ve_bus_'):
-            suffix = e.entity_id[len('sensor.ve_bus_'):]
-            new_eid = f"sensor.{cfg_slug}_ve_bus_{suffix}"
-        elif e.entity_id.startswith('select.ve_bus_'):
-            suffix = e.entity_id[len('select.ve_bus_'):]
-            new_eid = f"select.{cfg_slug}_ve_bus_{suffix}"
-        else:
+        new_eid: str | None = None
+
+        m = p_inst.match(e.entity_id)
+        if m:
+            new_eid = f"{m.group('domain')}.{cfg_slug}_ve_bus_{m.group('rest')}"
+
+        if new_eid is None:
+            m = p_plain.match(e.entity_id)
+            if m:
+                new_eid = f"{m.group('domain')}.{cfg_slug}_ve_bus_{m.group('rest')}"
+
+        if new_eid is None:
+            m = p_cfg.match(e.entity_id)
+            if m:
+                new_eid = f"{m.group('domain')}.{cfg_slug}_ve_bus_{m.group('rest')}"
+
+        if new_eid is None:
             continue
 
         if new_eid == e.entity_id:
@@ -171,7 +201,9 @@ async def async_setup_entry(
 ) -> None:
     cfg_name: str = (entry.title or entry.data.get(CONF_NAME) or 'home')
     cfg_slug: str = _slug(cfg_name)
-    await _migrate_entity_registry(hass, entry, cfg_slug)
+    # Entity IDs are prefixed with the config entry name slug for repeatable naming
+    # across installations (e.g. sensor.ve_base_ve_bus_state).
+    await _migrate_entity_registry(hass, entry)
     prefix: str = entry.data[CONF_TOPIC_PREFIX]
     portal: str = entry.data[CONF_PORTAL_ID]
 
@@ -287,24 +319,22 @@ class VictronVeBusStateSensor(SensorEntity):
         self._custom_name = custom_name
         self._state_code: int | None = None
 
-        dev_name = VE_BUS_DEVICE_NAME
+        # Attach all VE-Bus entities to the single Victron GX (Cerbo GX) HA device.
+        # We intentionally do NOT create a separate "VE-Bus" device.
         self._attr_device_info = DeviceInfo(
-            # MUST match Select entity to merge under same HA device.
-            identifiers={(DOMAIN, _device_ident(portal_id, vebus_instance))},
-            name=dev_name,
-            manufacturer="Victron Energy",
-            model="VE.Bus",
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
         )
 
         # Entity name (UI). Keep single-language; DE/EN mappings are exposed via attributes.
         self._attr_name = "VE-Bus State"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_state"
 
-        # Entity-ID convention (object_id): prefixed with integration instance name
-        # (created during integration setup). Victron instance numbers must not
-        # appear in entity_ids.
-        # Example: sensor.ve_base_ve_bus_state
-        self._attr_object_id = f"{self._cfg_slug}_ve_bus_state"
+        # Suggested entity_id (object_id). Must include config slug, but must NOT
+        # include the Victron instance number.
+        self._attr_suggested_object_id = f"{cfg_slug}_ve_bus_state"
 
         self._attr_native_value = None
 
@@ -414,12 +444,12 @@ class VictronVeBusAcOutSensor(SensorEntity):
         self._custom_name = custom_name
         self._sdef = sdef
 
-        dev_name = VE_BUS_DEVICE_NAME
+        # Attach all VE-Bus entities to the single Victron GX (Cerbo GX) HA device.
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, _device_ident(portal_id, vebus_instance))},
-            name=dev_name,
-            manufacturer="Victron Energy",
-            model="VE.Bus",
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
         )
 
         # UI name (explicit) - always prefixed with "VE-Bus".
@@ -428,9 +458,8 @@ class VictronVeBusAcOutSensor(SensorEntity):
         # Keep unique_id instance-based and stable.
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_{sdef.key}"
 
-        # Entity-ID convention (object_id): prefixed with integration instance name
-        # Example: sensor.ve_base_ve_bus_ac_out_l1_power
-        self._attr_object_id = f"{self._cfg_slug}_ve_bus_{sdef.object_id_suffix}"
+        # Suggested entity_id (object_id). Includes config slug, but no instance number.
+        self._attr_suggested_object_id = f"{cfg_slug}_ve_bus_{sdef.object_id_suffix}"
 
         self._attr_device_class = sdef.device_class
         self._attr_state_class = sdef.state_class
