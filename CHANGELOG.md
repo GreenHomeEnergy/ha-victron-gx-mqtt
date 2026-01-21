@@ -1,51 +1,29 @@
 # Changelog
 
-Full change history for the **Victron GX MQTT** Home Assistant integration.
-This project uses pre-release versions in the format: `0.x.y-pre-n`.
+All notable changes to this project will be documented in this file.
 
 ## 0.1.6-pre-7
-### Added
-- VE.Bus **AC Out** sensors for inverter output (house consumption):
-  - Total: Power (`Ac/Out/P`)
-  - Per phase **L1/L2/L3**: Power (`P`), Current (`I`), Voltage (`V`), Frequency (`F`)
-- Robust value parsing for MQTT payloads:
-  - Supports numeric JSON values (float/int) and string values with `.` or `,` decimal separators.
-
-### Changed
-- Deterministic VE.Bus naming behavior:
-  - Device name fixed to **`VE-Bus`**.
-  - Entity IDs are deterministic and do not include the Victron instance number (e.g., `276`).
-  - Entity IDs are prefixed by the **integration instance name** (Config Entry title), slugified.
-  - Entity UI names are explicitly set (prefixed with `VE-Bus …`) to prevent Home Assistant auto-prefixing.
-
-### Fixed
-- Correct units, device classes, and state classes for AC Out sensors:
-  - Power → `W` (`device_class=power`, `state_class=measurement`)
-  - Current → `A` (`device_class=current`, `state_class=measurement`)
-  - Voltage → `V` (`device_class=voltage`, `state_class=measurement`)
-  - Frequency → `Hz` (`device_class=frequency`, `state_class=measurement`)
-
----
+- Fix: deterministic Entity IDs using the config name (slug) as prefix (e.g. `sensor.<cfg>_ve_bus_...`).
+- Fix: enforce "VE-Bus" prefix in all entity display names.
+- Fix: unify device metadata (manufacturer/model/name) so all entities belong to the same device.
+- Add: set manufacturer to "Victron Energy" for the device.
+- Add: include repository-level files for HACS (logos) and Home Assistant changelog visibility.
 
 ## 0.1.5-pre-6
-### Added
-- Stabilized the project foundation for deterministic naming and device mapping aligned with Victron DBus/MQTT structure.
-- Consolidated VE.Bus identity rules and clean separation of `entity_id` vs `unique_id`.
+- Add: VE-Bus sensors & select entities (initial usable VE-Bus feature set).
+- Add: basic config flow (MQTT connection parameters).
 
-### Changed
-- UI names standardized to single-language (English); multilingual information is provided via attributes where applicable.
-- Removed instance numbers from entity IDs by design (entity IDs are stable; unique IDs remain instance-based).
-
----
+## 0.1.4-pre-5
+- Improvements and internal refactoring.
 
 ## 0.1.3-pre-4
-### Added
-- Initial VE.Bus topic discovery via Home Assistant Core MQTT (`homeassistant.components.mqtt`).
-- VE.Bus **State** sensor.
-- VE.Bus **Mode** select (writeable via MQTT).
-- Asynchronous handling of `CustomName` (often arrives later than State/Mode).
+- Improvements and internal refactoring.
 
----
+## 0.1.2-pre-3
+- Improvements and internal refactoring.
 
-## Earlier internal iterations
-- Earlier iterations existed prior to 0.1.3-pre-4; detailed notes were not captured in a structured changelog.
+## 0.1.1-pre-2
+- Initial pre-release iterations.
+
+## 0.1.0-pre-1
+- Initial pre-release.
