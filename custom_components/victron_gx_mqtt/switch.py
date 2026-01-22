@@ -254,7 +254,7 @@ class VictronVeBusGridActiveSwitch(_BaseVeBusModeSwitch):
     ) -> None:
         super().__init__(hass, entry, cfg_slug, topic_prefix, portal_id, vebus_instance)
 
-        self._attr_name = "Grid Active"
+        self._attr_name = "VE-Bus Grid Active"
         self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_grid_active"
 
         # Global naming rule: <cfg_slug>_ve_bus_<suffix>
