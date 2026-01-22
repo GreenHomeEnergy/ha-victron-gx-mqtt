@@ -19,7 +19,7 @@ CONF_NAME: Final = "name"
 CONF_TOPIC_PREFIX: Final = "topic_prefix"
 CONF_PORTAL_ID: Final = "portal_id"
 
-PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.SELECT]
+PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.SELECT, Platform.SWITCH, Platform.NUMBER]
 
 # Global fixed naming (project decision)
 VE_BUS_DEVICE_NAME: Final = "VE-Bus"

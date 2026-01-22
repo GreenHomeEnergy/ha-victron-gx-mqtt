@@ -44,6 +44,10 @@ _VEBUS_AC_OUT_RE = re.compile(
 )
 
 
+_VEBUS_AC_IN_RE = re.compile(
+    r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/vebus/(?P<instance>\d+)/Ac/(?P<sub>(?:ActiveIn|In))(?:/(?P<phase>L[123]))?/(?P<metric>(?:P|I|V|F|CurrentLimit))$"
+)
+
 @dataclass(frozen=True)
 class _SensorDef:
     key: str
@@ -98,6 +102,7 @@ _AC_OUT_DEFS: dict[str, _SensorDef] = _ac_out_sensor_defs()
 class _Runtime:
     state_entities: dict[str, "VictronVeBusStateSensor"]
     ac_out_entities: dict[str, "VictronVeBusAcOutSensor"]
+    ac_in_entities: dict[str, "VictronVeBusAcInSensor"]
     customname_by_instance: dict[str, str]
 
 
@@ -209,7 +214,7 @@ async def async_setup_entry(
 
     runtime: _Runtime = hass.data[DOMAIN][entry.entry_id].setdefault(
         "sensor_runtime",
-        _Runtime(state_entities={}, ac_out_entities={}, customname_by_instance={}),
+        _Runtime(state_entities={}, ac_out_entities={}, ac_in_entities={}, customname_by_instance={}),
     )
 
     signal: str = hass.data[DOMAIN][entry.entry_id]["signal"]
@@ -234,6 +239,39 @@ async def async_setup_entry(
                     if aent.vebus_instance == inst:
                         aent.set_custom_name(custom_name)
             return
+
+        
+        # AC In sensors (ActiveIn and In)
+        m_in = _VEBUS_AC_IN_RE.match(topic)
+        if m_in and m_in.group("prefix") == prefix and m_in.group("portal") == portal:
+            inst = m_in.group("instance")
+            phase = m_in.group("phase")
+            metric = m_in.group("metric")
+
+            key = _ac_in_key(phase, metric)
+            if key is None:
+                return
+
+            ent_key = f"{inst}:{key}"
+            ent = runtime.ac_in_entities.get(ent_key)
+            if ent is None:
+                sdef = _AC_IN_DEFS[key]
+                ent = VictronVeBusAcInSensor(
+                    hass=hass,
+                    entry=entry,
+                    cfg_name=cfg_name,
+                    cfg_slug=cfg_slug,
+                    portal_id=portal,
+                    vebus_instance=inst,
+                    custom_name=runtime.customname_by_instance.get(inst),
+                    sdef=sdef,
+                )
+                runtime.ac_in_entities[ent_key] = ent
+                async_add_entities([ent])
+
+            ent.handle_value(payload)
+            return
+
 
         # AC Out sensors (Total and per phase)
         m_ac = _VEBUS_AC_OUT_RE.match(topic)
@@ -399,13 +437,13 @@ def _parse_numeric_value(payload: dict[str, Any]) -> float | None:
 
 
 def _ac_out_key(phase: str | None, metric: str) -> str | None:
-    """Map regex match groups to our canonical sensor key."""
+    """Map VE.Bus AC Out regex match groups to our canonical sensor key."""
 
     if phase is None:
-        # Total values: only /Ac/Out/P is relevant for now.
+        # Total values: only /Ac/Out/P is relevant
         return "ac_out_power_total" if metric == "P" else None
 
-    metric_map = {
+    metric_map: dict[str, str] = {
         "P": "power",
         "I": "current",
         "V": "voltage",
@@ -415,6 +453,87 @@ def _ac_out_key(phase: str | None, metric: str) -> str | None:
     if suffix is None:
         return None
     return f"ac_out_{phase.lower()}_{suffix}"
+
+
+def _ac_in_key(phase: str | None, metric: str) -> str | None:
+    """Map VE.Bus AC In regex match groups to our canonical sensor key."""
+
+    if metric == "CurrentLimit":
+        return None  # handled by NumberEntity
+
+    if phase is None:
+        return "ac_in_power_total" if metric == "P" else None
+
+    metric_map: dict[str, str] = {
+        "P": "power",
+        "I": "current",
+        "V": "voltage",
+        "F": "frequency",
+    }
+    suffix = metric_map.get(metric)
+    if suffix is None:
+        return None
+    return f"ac_in_{phase.lower()}_{suffix}"
+
+
+class VictronVeBusAcInSensor(SensorEntity):
+    """VE.Bus AC In sensors (Total and per phase)."""
+
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        cfg_name: str,
+        cfg_slug: str,
+        portal_id: str,
+        vebus_instance: str,
+        custom_name: str | None,
+        sdef: _SensorDef,
+    ) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._cfg_name = cfg_name
+        self._cfg_slug = cfg_slug
+        self._portal = portal_id
+        self._instance = vebus_instance
+        self._custom_name = custom_name
+        self._sdef = sdef
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
+        )
+
+        self._attr_name = f"VE-Bus {sdef.entity_name}"
+        self._attr_unique_id = f"{portal_id}_vebus_{vebus_instance}_{sdef.key}"
+        self._attr_suggested_object_id = f"{cfg_slug}_ve_bus_{sdef.object_id_suffix}"
+
+        self._attr_device_class = sdef.device_class
+        self._attr_native_unit_of_measurement = sdef.unit
+        self._attr_state_class = sdef.state_class
+
+        if sdef.device_class == SensorDeviceClass.FREQUENCY:
+            self._attr_suggested_display_precision = 2
+
+    @property
+    def vebus_instance(self) -> str:
+        return self._instance
+
+    def set_custom_name(self, custom_name: str | None) -> None:
+        self._custom_name = custom_name
+
+    def handle_value(self, payload: dict[str, Any]) -> None:
+        val = _parse_numeric_value(payload)
+        if val is None:
+            return
+        if self._sdef.device_class == SensorDeviceClass.FREQUENCY:
+            val = round(val, 2)
+        self._attr_native_value = val
+        self.async_write_ha_state()
 
 
 class VictronVeBusAcOutSensor(SensorEntity):
@@ -499,3 +618,43 @@ def _slug(text: str) -> str:
                 prev_us = True
     s = "".join(out).strip("_")
     return s or "home"
+
+
+def _ac_in_sensor_defs() -> dict[str, "_SensorDef"]:
+    """Definitions for VE.Bus AC In sensors (topic -> entity metadata)."""
+
+    defs: dict[str, _SensorDef] = {
+        # Total
+        "ac_in_power_total": _SensorDef(
+            key="ac_in_power_total",
+            entity_name="AC In Power Total",
+            object_id_suffix="ac_in_power_total",
+            device_class=SensorDeviceClass.POWER,
+            unit=UnitOfPower.WATT,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+    }
+
+    metric_map: dict[str, tuple[str, str, SensorDeviceClass, str]] = {
+        "P": ("power", "Power", SensorDeviceClass.POWER, UnitOfPower.WATT),
+        "I": ("current", "Current", SensorDeviceClass.CURRENT, UnitOfElectricCurrent.AMPERE),
+        "V": ("voltage", "Voltage", SensorDeviceClass.VOLTAGE, UnitOfElectricPotential.VOLT),
+        "F": ("frequency", "Frequency", SensorDeviceClass.FREQUENCY, UnitOfFrequency.HERTZ),
+    }
+
+    for phase in ("L1", "L2", "L3"):
+        for metric, (suffix, label, dev_class, unit) in metric_map.items():
+            key = f"ac_in_{phase.lower()}_{suffix}"
+            defs[key] = _SensorDef(
+                key=key,
+                entity_name=f"AC In {phase} {label}",
+                object_id_suffix=key,
+                device_class=dev_class,
+                unit=unit,
+                state_class=SensorStateClass.MEASUREMENT,
+            )
+
+    return defs
+
+
+_AC_IN_DEFS = _ac_in_sensor_defs()

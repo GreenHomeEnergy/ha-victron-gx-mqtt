@@ -39,47 +39,71 @@ def _slug(text: str) -> str:
     return s or "home"
 
 
+
 async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Best-effort migration to the **fixed** VE-Bus entity_id scheme.
+    """Best-effort migration to the **global** entity_id scheme.
 
-    Project decision (repeatable naming): entity_ids are **not** prefixed with the
-    config entry name (e.g. no "ve_base" / "ve_home"). Victron instance numbers
-    (e.g. 276) must not appear in entity_ids either.
+    Global rule (verbindlich):
+        <entity_domain>.<cfg_slug>_ve_bus_<object_id_suffix>
 
-    Target patterns:
-      sensor.ve_bus_state
-      select.ve_bus_mode
-      sensor.ve_bus_ac_out_l1_power
-
-    Migration handles the common historical patterns:
-      sensor.ve_bus_276_ac_out_l1_power -> sensor.ve_bus_ac_out_l1_power
-      sensor.<oldcfg>_ve_bus_*          -> sensor.ve_bus_*
+    Notes:
+    - Home Assistant persists entity_ids in the Entity Registry; changing
+      `_attr_suggested_object_id` alone does not rename existing entities.
+    - This migration is intentionally conservative: it only renames when the
+      target entity_id is free (no collision).
     """
 
     ent_reg = er.async_get(hass)
     entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
 
-    # 1) ve_bus_<instance>_<rest>
-    p_inst = re.compile(r"^(?P<domain>sensor|select)\.ve_bus_(?P<inst>\d+)_(?P<rest>.+)$")
-    # 2) <oldcfg>_ve_bus_<rest>
-    p_cfg = re.compile(r"^(?P<domain>sensor|select)\.(?P<oldcfg>[a-z0-9_]+)_ve_bus_(?P<rest>.+)$")
+    cfg_name: str = (entry.title or entry.data.get(CONF_NAME) or "home")
+    cfg_slug: str = _slug(cfg_name)
+
+    # Historical patterns we may encounter:
+    # 1) <domain>.ve_bus_<rest>
+    p_no_cfg = re.compile(r"^(?P<domain>sensor|select|switch)\.ve_bus_(?P<rest>.+)$")
+    # 2) <domain>.ve_bus_<instance>_<rest>
+    p_inst = re.compile(r"^(?P<domain>sensor|select|switch)\.ve_bus_(?P<inst>\d+)_(?P<rest>.+)$")
+    # 3) <domain>.<oldcfg>_ve_bus_<rest>
+    p_old_cfg = re.compile(
+        r"^(?P<domain>sensor|select|switch)\.(?P<oldcfg>[a-z0-9_]+)_ve_bus_(?P<rest>.+)$"
+    )
+    # 4) Early switch names without ve_bus prefix at all
+    p_switch_short = re.compile(r"^switch\.(?P<rest>grid_active)$")
+    # 5) Early switch names with ve_bus but missing cfg
+    p_switch_ve_bus = re.compile(r"^switch\.(?P<rest>ve_bus_(?:grid_active|emergency_shutdown))$")
 
     for e in entries:
         new_entity_id: str | None = None
 
         m = p_inst.match(e.entity_id)
         if m:
-            new_entity_id = f"{m.group('domain')}.ve_bus_{m.group('rest')}"
+            new_entity_id = f"{m.group('domain')}.{cfg_slug}_ve_bus_{m.group('rest')}"
 
         if new_entity_id is None:
-            m = p_cfg.match(e.entity_id)
+            m = p_old_cfg.match(e.entity_id)
             if m:
-                new_entity_id = f"{m.group('domain')}.ve_bus_{m.group('rest')}"
+                new_entity_id = f"{m.group('domain')}.{cfg_slug}_ve_bus_{m.group('rest')}"
+
+        if new_entity_id is None:
+            m = p_no_cfg.match(e.entity_id)
+            if m:
+                new_entity_id = f"{m.group('domain')}.{cfg_slug}_ve_bus_{m.group('rest')}"
+
+        if new_entity_id is None:
+            m = p_switch_short.match(e.entity_id)
+            if m:
+                new_entity_id = f"switch.{cfg_slug}_ve_bus_{m.group('rest')}"
+
+        if new_entity_id is None:
+            m = p_switch_ve_bus.match(e.entity_id)
+            if m:
+                rest = m.group("rest")[len("ve_bus_") :]
+                new_entity_id = f"switch.{cfg_slug}_ve_bus_{rest}"
 
         if not new_entity_id or new_entity_id == e.entity_id:
             continue
 
-        # Avoid collisions if something already exists.
         if ent_reg.async_get(new_entity_id) is not None:
             continue
 
