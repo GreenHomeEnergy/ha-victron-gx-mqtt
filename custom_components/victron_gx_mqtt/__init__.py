@@ -61,12 +61,12 @@ async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> 
 
     # Historical patterns we may encounter:
     # 1) <domain>.ve_bus_<rest>
-    p_no_cfg = re.compile(r"^(?P<domain>sensor|select|switch)\.ve_bus_(?P<rest>.+)$")
+    p_no_cfg = re.compile(r"^(?P<domain>sensor|select|switch|number)\.ve_bus_(?P<rest>.+)$")
     # 2) <domain>.ve_bus_<instance>_<rest>
-    p_inst = re.compile(r"^(?P<domain>sensor|select|switch)\.ve_bus_(?P<inst>\d+)_(?P<rest>.+)$")
+    p_inst = re.compile(r"^(?P<domain>sensor|select|switch|number)\.ve_bus_(?P<inst>\d+)_(?P<rest>.+)$")
     # 3) <domain>.<oldcfg>_ve_bus_<rest>
     p_old_cfg = re.compile(
-        r"^(?P<domain>sensor|select|switch)\.(?P<oldcfg>[a-z0-9_]+)_ve_bus_(?P<rest>.+)$"
+        r"^(?P<domain>sensor|select|switch|number)\.(?P<oldcfg>[a-z0-9_]+)_ve_bus_(?P<rest>.+)$"
     )
     # 4) Early switch names without ve_bus prefix at all
     p_switch_short = re.compile(r"^switch\.(?P<rest>grid_active)$")
@@ -181,3 +181,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return unload_ok
+
+

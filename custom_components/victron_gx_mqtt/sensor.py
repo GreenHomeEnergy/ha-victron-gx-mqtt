@@ -13,6 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from homeassistant.const import (
+    PERCENTAGE,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfFrequency,
@@ -38,6 +39,12 @@ _VEBUS_STATE_RE = re.compile(
 _VEBUS_CUSTOMNAME_RE = re.compile(
     r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/vebus/(?P<instance>\d+)/CustomName$"
 )
+
+
+_VEBUS_BATTERY_RE = re.compile(
+    r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/vebus/(?P<instance>\d+)/(?P<path>(?:Soc|Dc/0/(?:Power|Current|Voltage)))$"
+)
+
 
 _VEBUS_AC_OUT_RE = re.compile(
     r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/vebus/(?P<instance>\d+)/Ac/Out(?:/(?P<phase>L[123]))?/(?P<metric>[PIVF])$"
@@ -98,11 +105,49 @@ def _ac_out_sensor_defs() -> dict[str, "_SensorDef"]:
 _AC_OUT_DEFS: dict[str, _SensorDef] = _ac_out_sensor_defs()
 
 
+_BATTERY_DEFS: dict[str, _SensorDef] = {
+    "battery_soc": _SensorDef(
+        key="battery_soc",
+        entity_name="Battery SOC",
+        object_id_suffix="battery_soc",
+        device_class=SensorDeviceClass.BATTERY,
+        unit=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "battery_power": _SensorDef(
+        key="battery_power",
+        entity_name="Battery Power",
+        object_id_suffix="battery_power",
+        device_class=SensorDeviceClass.POWER,
+        unit=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "battery_current": _SensorDef(
+        key="battery_current",
+        entity_name="Battery Current",
+        object_id_suffix="battery_current",
+        device_class=SensorDeviceClass.CURRENT,
+        unit=UnitOfElectricCurrent.AMPERE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "battery_voltage": _SensorDef(
+        key="battery_voltage",
+        entity_name="Battery Voltage",
+        object_id_suffix="battery_voltage",
+        device_class=SensorDeviceClass.VOLTAGE,
+        unit=UnitOfElectricPotential.VOLT,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+}
+
+
+
 @dataclass
 class _Runtime:
     state_entities: dict[str, "VictronVeBusStateSensor"]
     ac_out_entities: dict[str, "VictronVeBusAcOutSensor"]
     ac_in_entities: dict[str, "VictronVeBusAcInSensor"]
+    battery_entities: dict[str, "VictronVeBusBatterySensor"]
     customname_by_instance: dict[str, str]
 
 
@@ -214,7 +259,13 @@ async def async_setup_entry(
 
     runtime: _Runtime = hass.data[DOMAIN][entry.entry_id].setdefault(
         "sensor_runtime",
-        _Runtime(state_entities={}, ac_out_entities={}, ac_in_entities={}, customname_by_instance={}),
+        _Runtime(
+            state_entities={},
+            ac_out_entities={},
+            ac_in_entities={},
+            battery_entities={},
+            customname_by_instance={},
+        ),
     )
 
     signal: str = hass.data[DOMAIN][entry.entry_id]["signal"]
@@ -238,9 +289,56 @@ async def async_setup_entry(
                 for aent in list(runtime.ac_out_entities.values()):
                     if aent.vebus_instance == inst:
                         aent.set_custom_name(custom_name)
+
+                # Update all AC In sensors for that instance.
+                for aent in list(runtime.ac_in_entities.values()):
+                    if aent.vebus_instance == inst:
+                        aent.set_custom_name(custom_name)
+
+                # Update all Battery sensors for that instance.
+                for aent in list(runtime.battery_entities.values()):
+                    if aent.vebus_instance == inst:
+                        aent.set_custom_name(custom_name)
             return
 
         
+
+        # VE-Bus battery sensors (SOC and DC/0)
+        m_batt = _VEBUS_BATTERY_RE.match(topic)
+        if m_batt and m_batt.group("prefix") == prefix and m_batt.group("portal") == portal:
+            inst = m_batt.group("instance")
+            path = m_batt.group("path")
+
+            key_map: dict[str, str] = {
+                "Soc": "battery_soc",
+                "Dc/0/Power": "battery_power",
+                "Dc/0/Current": "battery_current",
+                "Dc/0/Voltage": "battery_voltage",
+            }
+            key = key_map.get(path)
+            if key is None:
+                return
+
+            ent_key = f"{inst}:{key}"
+            ent = runtime.battery_entities.get(ent_key)
+            if ent is None:
+                sdef = _BATTERY_DEFS[key]
+                ent = VictronVeBusBatterySensor(
+                    hass=hass,
+                    entry=entry,
+                    cfg_name=cfg_name,
+                    cfg_slug=cfg_slug,
+                    portal_id=portal,
+                    vebus_instance=inst,
+                    custom_name=runtime.customname_by_instance.get(inst),
+                    sdef=sdef,
+                )
+                runtime.battery_entities[ent_key] = ent
+                async_add_entities([ent])
+
+            ent.handle_value(payload)
+            return
+
         # AC In sensors (ActiveIn and In)
         m_in = _VEBUS_AC_IN_RE.match(topic)
         if m_in and m_in.group("prefix") == prefix and m_in.group("portal") == portal:
@@ -476,6 +574,73 @@ def _ac_in_key(phase: str | None, metric: str) -> str | None:
     return f"ac_in_{phase.lower()}_{suffix}"
 
 
+
+class VictronVeBusBatterySensor(SensorEntity):
+    """VE.Bus battery related sensors (SOC and DC measurements)."""
+
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        cfg_name: str,
+        cfg_slug: str,
+        portal_id: str,
+        vebus_instance: str,
+        custom_name: str | None,
+        sdef: _SensorDef,
+    ) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._cfg_name = cfg_name
+        self._cfg_slug = cfg_slug
+        self._portal = portal_id
+        self._instance = vebus_instance
+        self._custom_name = custom_name
+        self._sdef = sdef
+
+        # Battery values belong to the Cerbo GX device (VE.Bus subsystem).
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
+        )
+
+        self._attr_name = f"VE-Bus {sdef.entity_name}"
+        self._attr_unique_id = f"{entry.entry_id}_vebus_{vebus_instance}_{sdef.key}"
+        self._attr_suggested_object_id = f"{cfg_slug}_ve_bus_{sdef.object_id_suffix}"
+
+        self._attr_device_class = sdef.device_class
+        self._attr_native_unit_of_measurement = sdef.unit
+        self._attr_state_class = sdef.state_class
+
+        # Display rules (project decision):
+        # - Battery SOC and Battery Voltage must be shown with 2 decimal places.
+        if sdef.key in ("battery_soc", "battery_voltage"):
+            self._attr_suggested_display_precision = 2
+
+        self._attr_native_value = None
+
+    @property
+    def vebus_instance(self) -> str:
+        return self._instance
+
+    def set_custom_name(self, custom_name: str | None) -> None:
+        self._custom_name = custom_name
+
+    @callback
+    def handle_value(self, payload: dict[str, Any]) -> None:
+        val = _parse_numeric_value(payload)
+        if val is None:
+            return
+        if self._sdef.key in ("battery_soc", "battery_voltage"):
+            val = round(val, 2)
+        self._attr_native_value = val
+        self.async_write_ha_state()
+
+
 class VictronVeBusAcInSensor(SensorEntity):
     """VE.Bus AC In sensors (Total and per phase)."""
 
@@ -584,6 +749,10 @@ class VictronVeBusAcOutSensor(SensorEntity):
         self._attr_state_class = sdef.state_class
         self._attr_native_unit_of_measurement = sdef.unit
 
+        # Frequency sensors must be shown with 2 decimal places (project rule).
+        if sdef.device_class == SensorDeviceClass.FREQUENCY:
+            self._attr_suggested_display_precision = 2
+
         self._attr_native_value = None
 
     @property
@@ -599,6 +768,8 @@ class VictronVeBusAcOutSensor(SensorEntity):
         val = _parse_numeric_value(payload)
         if val is None:
             return
+        if self._sdef.device_class == SensorDeviceClass.FREQUENCY:
+            val = round(val, 2)
         self._attr_native_value = val
         self.async_write_ha_state()
 
