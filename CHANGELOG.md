@@ -1,8 +1,41 @@
 # Changelog  
+
+Dieses Changelog ist **kumulativ und global** gemäß GLOBAL_RULES.md.
+Es enthält alle Änderungen aller Versionen.
+
+---
+
 All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog  
 and this project uses pre-release versioning.
+
+---
+
+## [0.1.8-pre-9] – Finaler Stand für Release
+
+### Added
+- VE-Bus Battery Sensoren unter Device **Cerbo GX**:
+  - VE-Bus Battery SOC (`.../vebus/<n>/Soc`)
+  - VE-Bus Battery Power (`.../vebus/<n>/Dc/0/Power`)
+  - VE-Bus Battery Current (`.../vebus/<n>/Dc/0/Current`)
+  - VE-Bus Battery Voltage (`.../vebus/<n>/Dc/0/Voltage`)
+- Schreibbare VE-Bus Battery DVCC Settings (Settings/SystemSetup):
+  - VE-Bus Battery DVCC Max Charge Voltage (`.../settings/0/Settings/SystemSetup/MaxChargeVoltage`) – **2 Nachkommastellen**
+  - VE-Bus Battery DVCC Max Charge Current (`.../settings/0/Settings/SystemSetup/MaxChargeCurrent`)
+
+### Changed
+- VE-Bus **AC Out Frequency**: Anzeige mit **2 Nachkommastellen**.
+- VE-Bus **Battery SOC**: Anzeige mit **2 Nachkommastellen**.
+- VE-Bus **Battery Voltage**: Anzeige mit **2 Nachkommastellen**.
+
+### Fixed
+- Sensor-Plattform stabilisiert (Import-/Runtime-Probleme behoben).
+- Number-Plattform stabilisiert (korrekte Topic-Matches/Regex, robustes Parsing von `{"min":...,"max":...,"value":...}`).
+- Entity-ID Migrationen gemäß GLOBAL_RULES.md:
+  - `number.<cfg>_ve_bus_ac_in_current_limit`
+  - `number.<cfg>_ve_bus_battery_dvcc_max_charge_voltage`
+  - `number.<cfg>_ve_bus_battery_dvcc_max_charge_current`
 
 ---
 
@@ -16,7 +49,7 @@ and this project uses pre-release versioning.
 - Automatic migration for:
   - number.ac_in_current_limit
   - number.ve_bus_ac_in_current_limit
-  → number.<cfg>_ve_bus_ac_in_current_limit
+  ? number.<cfg>_ve_bus_ac_in_current_limit
 
 ### Changed
 - Frequency sensors now show 2 decimal places (e.g. 49.95 Hz)
