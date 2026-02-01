@@ -5,9 +5,15 @@ import re
 from typing import Any
 
 from homeassistant.components.mqtt import async_publish
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricCurrent, UnitOfElectricPotential, STATE_UNKNOWN, STATE_UNAVAILABLE, UnitOfElectricPotential, STATE_UNKNOWN, STATE_UNAVAILABLE
+from homeassistant.const import (
+    PERCENTAGE,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -24,6 +30,10 @@ _DVCC_MAX_CHARGE_VOLTAGE_RE = re.compile(
 )
 _DVCC_MAX_CHARGE_CURRENT_RE = re.compile(
     r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/settings/(?P<sid>\d+)/Settings/SystemSetup/MaxChargeCurrent$"
+)
+
+_ESS_MIN_SOC_LIMIT_RE = re.compile(
+    r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/settings/(?P<sid>\d+)/Settings/CGwacs/BatteryLife/MinimumSocLimit$"
 )
 
 
@@ -205,6 +215,55 @@ class VictronDvccMaxChargeCurrent(_VictronRestoreNumber):
 
 
 
+class VictronVeBusEssMinimumSocLimit(_VictronRestoreNumber):
+    _attr_has_entity_name = False
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, cfg_slug: str, portal_id: str, settings_id: str) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._cfg_slug = cfg_slug
+        self._portal = portal_id
+        self._sid = settings_id
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
+        )
+
+        self._attr_name = "VE-Bus ESS Minimum SOC Limit"
+        self._attr_unique_id = f"{portal_id}_settings_{settings_id}_ess_minimum_soc_limit"
+        self._attr_suggested_object_id = f"{cfg_slug}_ve_bus_ess_minimum_soc_limit"
+        self._attr_native_unit_of_measurement = PERCENTAGE
+        self._attr_native_step = 1
+        self._attr_suggested_display_precision = 0
+        # Use numeric input field (no slider) per project requirements.
+        self._attr_mode = NumberMode.BOX
+
+    def handle_payload(self, payload: dict[str, Any]) -> None:
+        val = _parse_numeric(payload, "value")
+        if val is None:
+            return
+        self._attr_native_value = int(round(val))
+
+        mn = _parse_numeric(payload, "min")
+        mx = _parse_numeric(payload, "max")
+        if mn is not None:
+            self._attr_native_min_value = int(round(mn))
+        if mx is not None:
+            self._attr_native_max_value = int(round(mx))
+
+        self.async_write_ha_state()
+
+    async def async_set_native_value(self, value: float) -> None:
+        prefix = self._entry.data["topic_prefix"]
+        topic = f"{prefix}/W/{self._portal}/settings/{self._sid}/Settings/CGwacs/BatteryLife/MinimumSocLimit"
+        await async_publish(self.hass, topic, json.dumps({"value": int(round(float(value)))}), qos=0, retain=False)
+
+
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
     cfg_name = entry.data.get("name") or entry.title
     cfg_slug = (cfg_name or "victron").strip().lower().replace(" ", "_").replace("-", "_")
@@ -268,6 +327,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                     async_add_entities([ent])
                 ent.handle_payload(payload)
             return
+
+        # ESS Minimum SOC Limit (settings)
+        m = _ESS_MIN_SOC_LIMIT_RE.match(topic)
+        if m:
+            if m.group("prefix") == prefix and m.group("portal") == portal:
+                sid = m.group("sid")
+                ent = runtime["entities"].get(("ess_min_soc", sid))
+                if ent is None:
+                    ent = VictronVeBusEssMinimumSocLimit(hass, entry, cfg_slug, portal, sid)
+                    runtime["entities"][("ess_min_soc", sid)] = ent
+                    async_add_entities([ent])
+                ent.handle_payload(payload)
+            return
+
 
     entry.async_on_unload(async_dispatcher_connect(hass, signal, _on_message))
 
