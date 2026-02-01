@@ -1,126 +1,86 @@
-# ha-victron-gx-mqtt
+# Victron GX MQTT – Home Assistant Integration
 
-Home Assistant integration (HACS) for **Victron GX / Cerbo GX / Venus OS** using **MQTT**.  
-This project assumes you already forward Victron MQTT traffic to your Home Assistant MQTT broker via a **Mosquitto bridge** and keep the publishing alive via a **keepalive automation**.
-
----
-
-## Deutsch – Kurzbeschreibung
-
-Diese Integration nutzt die MQTT-Daten deines Victron GX Systems (Cerbo GX / Venus OS).  
-**Wichtig:** Die MQTT Topics aus dem Cerbo müssen per **Mosquitto Bridge** in deinen Home Assistant MQTT Broker gespiegelt werden – und per **Keepalive-Automation** dauerhaft aktiv gehalten werden.  
-Ohne Bridge und Keepalive erscheinen Topics oft nur kurz oder verschwinden nach einigen Sekunden.
+➡️ **Deutsch:** [Zur deutschen Beschreibung springen](#deutsche-beschreibung)
 
 ---
 
-## English – Short description
+## Overview
 
-This integration consumes MQTT data from a Victron GX system (Cerbo GX / Venus OS).  
-**Important:** You must mirror Victron topics into your Home Assistant MQTT broker using a **Mosquitto bridge** and keep the Cerbo publishing enabled via a **keepalive automation**.  
-Without bridge + keepalive, topics may only appear briefly and then disappear.
+This Home Assistant custom integration connects a **Victron GX system**
+(e.g. Cerbo GX with MultiPlus / MultiPlus-II) to Home Assistant via **MQTT**.
 
----
+It is designed for **stable, long-running monitoring and control** of
+**VE-Bus based Victron systems** using **Venus OS MQTT topics**.
 
-## Prerequisites (required)
-
-- Home Assistant (recommended: HA OS / Supervised)
-- MQTT broker available to Home Assistant (commonly **Mosquitto broker add-on**)
-- Home Assistant MQTT integration configured and connected
-- Victron GX device (Cerbo GX / Venus OS) reachable in your network
+All entities are created **dynamically from MQTT data**.
+No manual YAML sensor configuration is required.
 
 ---
 
-## Step 1 (required) — Create Mosquitto bridge config
+## ⚠️ Prerequisites (Important)
 
-Create a bridge configuration file in Home Assistant under:
+This integration **does not connect directly** to the Victron GX device.  
+It relies entirely on **MQTT topics published by Venus OS**.
 
-`/share/mosquitto/bridge-venus.conf`
-
-> Tip: If you use the HA File Editor add-on, you can edit files in `/share/…`.  
-> Your existing example file name is **bridge-venus.conf** (recommended to keep).
-
-### Example bridge configuration (template)
-
-Replace the placeholders:
-
-- `MQTT_BRIDGE_NAME` → e.g. `venus-home`
-- `CERBO_IP` → Cerbo GX / Venus OS IP address (e.g. `192.168.XXX.XXX`)
-- `MQTT_TOPIC_PREFIX` → prefix used locally inside your HA broker (e.g. `venus-home/`)
-
-```conf
-# MQTT Bridge Configuration under \\<HA_IP>\share\mosquitto
-
-connection MQTT_BRIDGE_NAME
-address CERBO_IP:1883
-
-topic N/# in 0 MQTT_TOPIC_PREFIX
-topic R/# out 0 MQTT_TOPIC_PREFIX
-topic W/# out 0 MQTT_TOPIC_PREFIX
-```
-
-### Concrete example
-
-```conf
-# MQTT Bridge Configuration unter \\<HA_IP>\share\mosquitto
-
-connection venus-home
-address <CERBO_IP>:1883
-topic N/# in 0 venus-home/
-topic R/# out 0 venus-home/
-topic W/# out 0 venus-home/
-```
-
-Restart the Mosquitto broker add-on after saving.
+Before installing this integration, **all prerequisites below must be met**.
 
 ---
 
-## Step 2 (required) — Keepalive automation
+## Required Victron Setup
 
-Create a Home Assistant automation to keep the Cerbo publishing MQTT data.
-
-### Template
-
-```yaml
-alias: KeepAlive MQTT Victron
-description: Request the data on the MQTT server
-mode: single
-trigger:
-  - platform: time_pattern
-    seconds: "/20"
-action:
-  - service: mqtt.publish
-    data:
-      topic: <MQTT_TOPIC_PREFIX>/R/<VRM_PORTAL_ID>/keepalive
-      payload: "{}"
-      qos: 0
-      retain: false
-```
-
-### Concrete example
-
-```yaml
-alias: KeepAlive MQTT Victron
-description: Request the data on the MQTT server
-mode: single
-trigger:
-  - platform: time_pattern
-    seconds: "/20"
-action:
-  - service: mqtt.publish
-    data:
-      topic: venus-home/R/<VRM_PORTAL_ID>/keepalive
-```
+### Victron GX / Venus OS
+- Cerbo GX (or compatible GX device)
+- **Venus OS with MQTT enabled**
+- MQTT publishing must be **permanently active**
+- Keepalive publishing is strongly recommended
 
 ---
 
-## Where to find the VRM Portal ID
+## Required Home Assistant Components
 
-- Cerbo GX UI: **Settings → VRM online portal**
-- VRM Portal website: system details page
+### Home Assistant Core
+- Home Assistant with MQTT integration enabled
+
+### Required Add-ons / Services
+- Mosquitto Broker (Home Assistant Add-on) or any external MQTT broker
 
 ---
 
-## License
+## 🔁 MQTT Bridge (Critical Requirement)
 
-MIT License
+In most installations, the Victron GX device and Home Assistant
+**do not use the same MQTT broker**.
 
+In this case, an **MQTT bridge is mandatory**.
+
+The bridge must forward all Victron MQTT topics unchanged and keep
+retained messages intact.
+
+---
+
+## Installation (HACS – Recommended)
+
+1. Open **HACS**
+2. Go to **Integrations**
+3. Click **Explore & Download Repositories**
+4. Search for **Victron GX MQTT**
+5. Install the integration
+6. Restart Home Assistant
+
+---
+
+<a id="deutsche-beschreibung"></a>
+
+## Deutsche Beschreibung
+
+Diese Home Assistant Integration bindet ein **Victron GX System**
+(z. B. Cerbo GX mit MultiPlus / MultiPlus-II) über **MQTT** an Home Assistant an.
+
+Die Integration nutzt ausschließlich die von **Venus OS veröffentlichten MQTT Topics**
+und verbindet sich **nicht direkt** mit dem GX-Gerät.
+
+### Voraussetzungen (zwingend)
+
+- Venus OS mit aktiviertem MQTT
+- MQTT Broker (z. B. Mosquitto Add-on)
+- In den meisten Installationen: **MQTT Bridge zwischen GX und Home Assistant**
