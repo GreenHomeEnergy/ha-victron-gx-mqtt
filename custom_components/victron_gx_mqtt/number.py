@@ -238,7 +238,7 @@ class VictronVeBusEssMinimumSocLimit(_VictronRestoreNumber):
         self._attr_native_unit_of_measurement = PERCENTAGE
         self._attr_native_step = 1
         self._attr_suggested_display_precision = 0
-        # Use numeric input field (no slider) per project requirements.
+        # Force UI to show a numeric input field (not a slider)
         self._attr_mode = NumberMode.BOX
 
     def handle_payload(self, payload: dict[str, Any]) -> None:

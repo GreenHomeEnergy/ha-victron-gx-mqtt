@@ -19,6 +19,9 @@ CONF_NAME: Final = "name"
 CONF_TOPIC_PREFIX: Final = "topic_prefix"
 CONF_PORTAL_ID: Final = "portal_id"
 
+# Optional feature flags (Config Entry Options)
+CONF_ENABLE_AC_LOAD: Final = "enable_ac_load"
+
 PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.SELECT, Platform.SWITCH, Platform.NUMBER]
 
 # Global fixed naming (project decision)

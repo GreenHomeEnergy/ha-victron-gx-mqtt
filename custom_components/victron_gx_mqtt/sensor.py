@@ -25,6 +25,7 @@ from .const import (
     CONF_NAME,
     CONF_TOPIC_PREFIX,
     CONF_PORTAL_ID,
+    CONF_ENABLE_AC_LOAD,
     MANUFACTURER,
     HUB_NAME,
     HUB_MODEL,
@@ -54,6 +55,18 @@ _VEBUS_AC_OUT_RE = re.compile(
 _VEBUS_AC_IN_RE = re.compile(
     r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/vebus/(?P<instance>\d+)/Ac/(?P<sub>(?:ActiveIn|In))(?:/(?P<phase>L[123]))?/(?P<metric>(?:P|I|V|F|CurrentLimit))$"
 )
+
+
+# VE.Bus AC-Load (optional, generated only when enabled via config entry option)
+_VEBUS_AC_LOAD_RE = re.compile(
+    r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/acload/(?P<instance>\d+)/Ac(?:/(?P<phase>L[123]))?/(?P<path>(?:Voltage|Power|Current|Frequency|Energy/Forward))$"
+)
+
+# System PV totals (aggregated on Cerbo GX)
+_SYSTEM_PV_RE = re.compile(
+    r"^(?P<prefix>[^/]+)/N/(?P<portal>[^/]+)/system/0/Dc/Pv/(?P<metric>(?:Power|Current))$"
+)
+
 
 @dataclass(frozen=True)
 class _SensorDef:
@@ -140,6 +153,105 @@ _BATTERY_DEFS: dict[str, _SensorDef] = {
     ),
 }
 
+_PV_TOTAL_DEFS: dict[str, _SensorDef] = {
+    "pv_total_power": _SensorDef(
+        key="pv_total_power",
+        entity_name="PV Total Power",
+        object_id_suffix="total_power",
+        device_class=SensorDeviceClass.POWER,
+        unit=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "pv_total_current": _SensorDef(
+        key="pv_total_current",
+        entity_name="PV Total Current",
+        object_id_suffix="total_current",
+        device_class=SensorDeviceClass.CURRENT,
+        unit=UnitOfElectricCurrent.AMPERE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+}
+
+
+
+def _ac_load_sensor_defs() -> dict[str, "_SensorDef"]:
+    """Definitions for optional VE.Bus AC-Load sensors."""
+
+    defs: dict[str, _SensorDef] = {
+        # Total
+        "ac_load_total_voltage": _SensorDef(
+            key="ac_load_total_voltage",
+            entity_name="AC-Load Total Voltage",
+            object_id_suffix="ac_load_total_voltage",
+            device_class=SensorDeviceClass.VOLTAGE,
+            unit=UnitOfElectricPotential.VOLT,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        "ac_load_total_power": _SensorDef(
+            key="ac_load_total_power",
+            entity_name="AC-Load Total Power",
+            object_id_suffix="ac_load_total_power",
+            device_class=SensorDeviceClass.POWER,
+            unit=UnitOfPower.WATT,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        "ac_load_total_current": _SensorDef(
+            key="ac_load_total_current",
+            entity_name="AC-Load Total Current",
+            object_id_suffix="ac_load_total_current",
+            device_class=SensorDeviceClass.CURRENT,
+            unit=UnitOfElectricCurrent.AMPERE,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        "ac_load_total_frequency": _SensorDef(
+            key="ac_load_total_frequency",
+            entity_name="AC-Load Total Frequency",
+            object_id_suffix="ac_load_total_frequency",
+            device_class=SensorDeviceClass.FREQUENCY,
+            unit=UnitOfFrequency.HERTZ,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        "ac_load_total_energy_forward": _SensorDef(
+            key="ac_load_total_energy_forward",
+            entity_name="AC-Load Total Forwarded Energy",
+            object_id_suffix="ac_load_total_energy_forward",
+            device_class=SensorDeviceClass.ENERGY,
+            unit="kWh",
+            state_class=SensorStateClass.TOTAL_INCREASING,
+        ),
+    }
+
+    # Per phase (no frequency per phase)
+    phase_metric_map: dict[str, tuple[str, str, SensorDeviceClass, str, SensorStateClass]] = {
+        "Power": ("power", "Power", SensorDeviceClass.POWER, UnitOfPower.WATT, SensorStateClass.MEASUREMENT),
+        "Voltage": ("voltage", "Voltage", SensorDeviceClass.VOLTAGE, UnitOfElectricPotential.VOLT, SensorStateClass.MEASUREMENT),
+        "Current": ("current", "Current", SensorDeviceClass.CURRENT, UnitOfElectricCurrent.AMPERE, SensorStateClass.MEASUREMENT),
+        "Energy/Forward": (
+            "energy_forward",
+            "Forwarded Energy",
+            SensorDeviceClass.ENERGY,
+            "kWh",
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+    }
+
+    for phase in ("L1", "L2", "L3"):
+        for metric, (suffix, label, dev_class, unit, state_class) in phase_metric_map.items():
+            key = f"ac_load_{phase.lower()}_{suffix}"
+            defs[key] = _SensorDef(
+                key=key,
+                entity_name=f"AC-Load {phase} {label}",
+                object_id_suffix=key,
+                device_class=dev_class,
+                unit=unit,
+                state_class=state_class,
+            )
+
+    return defs
+
+
+_AC_LOAD_DEFS: dict[str, _SensorDef] = _ac_load_sensor_defs()
+
 
 
 @dataclass
@@ -148,6 +260,8 @@ class _Runtime:
     ac_out_entities: dict[str, "VictronVeBusAcOutSensor"]
     ac_in_entities: dict[str, "VictronVeBusAcInSensor"]
     battery_entities: dict[str, "VictronVeBusBatterySensor"]
+    pv_entities: dict[str, "VictronPvTotalSensor"]
+    ac_load_entities: dict[str, "VictronVeBusAcLoadSensor"]
     customname_by_instance: dict[str, str]
 
 
@@ -263,7 +377,9 @@ async def async_setup_entry(
             state_entities={},
             ac_out_entities={},
             ac_in_entities={},
+            ac_load_entities={},
             battery_entities={},
+            pv_entities={},
             customname_by_instance={},
         ),
     )
@@ -337,6 +453,36 @@ async def async_setup_entry(
                 async_add_entities([ent])
 
             ent.handle_value(payload)
+
+        # System PV totals (Power/Current) - aggregated values
+        m_pv = _SYSTEM_PV_RE.match(topic)
+        if m_pv and m_pv.group("prefix") == prefix and m_pv.group("portal") == portal:
+            metric = m_pv.group("metric")
+            key_map: dict[str, str] = {
+                "Power": "pv_total_power",
+                "Current": "pv_total_current",
+            }
+            key = key_map.get(metric)
+            if key is None:
+                return
+
+            ent = runtime.pv_entities.get(key)
+            if ent is None:
+                sdef = _PV_TOTAL_DEFS[key]
+                ent = VictronPvTotalSensor(
+                    hass=hass,
+                    entry=entry,
+                    cfg_name=cfg_name,
+                    cfg_slug=cfg_slug,
+                    portal_id=portal,
+                    sdef=sdef,
+                )
+                runtime.pv_entities[key] = ent
+                async_add_entities([ent])
+
+            ent.handle_value(payload)
+            return
+
             return
 
         # AC In sensors (ActiveIn and In)
@@ -369,6 +515,38 @@ async def async_setup_entry(
 
             ent.handle_value(payload)
             return
+
+
+        # AC-Load sensors (optional)
+        if entry.options.get(CONF_ENABLE_AC_LOAD, False):
+            m_load = _VEBUS_AC_LOAD_RE.match(topic)
+            if m_load and m_load.group("prefix") == prefix and m_load.group("portal") == portal:
+                inst = m_load.group("instance")
+                phase = m_load.group("phase")
+                path = m_load.group("path")
+
+                key = _ac_load_key(phase, path)
+                if key is None:
+                    return
+
+                ent_key = f"{inst}:{key}"
+                ent = runtime.ac_load_entities.get(ent_key)
+                if ent is None:
+                    sdef = _AC_LOAD_DEFS[key]
+                    ent = VictronVeBusAcLoadSensor(
+                        hass=hass,
+                        entry=entry,
+                        cfg_name=cfg_name,
+                        cfg_slug=cfg_slug,
+                        portal_id=portal,
+                        acload_instance=inst,
+                        sdef=sdef,
+                    )
+                    runtime.ac_load_entities[ent_key] = ent
+                    async_add_entities([ent])
+
+                ent.handle_value(payload)
+                return
 
 
         # AC Out sensors (Total and per phase)
@@ -574,6 +752,31 @@ def _ac_in_key(phase: str | None, metric: str) -> str | None:
     return f"ac_in_{phase.lower()}_{suffix}"
 
 
+def _ac_load_key(phase: str | None, path: str) -> str | None:
+    """Map AC-Load regex match groups to our canonical sensor key."""
+
+    if phase is None:
+        total_map: dict[str, str] = {
+            "Voltage": "ac_load_total_voltage",
+            "Power": "ac_load_total_power",
+            "Current": "ac_load_total_current",
+            "Frequency": "ac_load_total_frequency",
+            "Energy/Forward": "ac_load_total_energy_forward",
+        }
+        return total_map.get(path)
+
+    phase_map: dict[str, str] = {
+        "Voltage": "voltage",
+        "Power": "power",
+        "Current": "current",
+        "Energy/Forward": "energy_forward",
+    }
+    suffix = phase_map.get(path)
+    if suffix is None:
+        return None
+    return f"ac_load_{phase.lower()}_{suffix}"
+
+
 
 class VictronVeBusBatterySensor(SensorEntity):
     """VE.Bus battery related sensors (SOC and DC measurements)."""
@@ -636,6 +839,69 @@ class VictronVeBusBatterySensor(SensorEntity):
         if val is None:
             return
         if self._sdef.key in ("battery_soc", "battery_voltage"):
+            val = round(val, 2)
+        self._attr_native_value = val
+        self.async_write_ha_state()
+
+
+
+
+class VictronPvTotalSensor(SensorEntity):
+    'System PV totals (Power/Current) reported by Cerbo GX.'
+
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        cfg_name: str,
+        cfg_slug: str,
+        portal_id: str,
+        sdef: _SensorDef,
+    ) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._cfg_name = cfg_name
+        self._cfg_slug = cfg_slug
+        self._portal = portal_id
+        self._sdef = sdef
+
+        # PV totals belong to the Cerbo GX device (aggregated system values).
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
+        )
+
+        # Name exactly as required: "VE-Bus PV Total Power" / "VE-Bus PV Total Current"
+        self._attr_name = f"VE-Bus {sdef.entity_name}"
+        self._attr_unique_id = f"{entry.entry_id}_system_{sdef.key}"
+        self._attr_suggested_object_id = f"{cfg_slug}_pv_{sdef.object_id_suffix}"
+
+        self._attr_device_class = sdef.device_class
+        self._attr_native_unit_of_measurement = sdef.unit
+        self._attr_state_class = sdef.state_class
+
+        # Display rules:
+        # - PV Total Power: 0 decimals (rounded)
+        # - PV Total Current: 2 decimals
+        if sdef.key == "pv_total_power":
+            self._attr_suggested_display_precision = 0
+        elif sdef.key == "pv_total_current":
+            self._attr_suggested_display_precision = 2
+
+        self._attr_native_value = None
+
+    @callback
+    def handle_value(self, payload: dict[str, Any]) -> None:
+        val = _parse_numeric_value(payload)
+        if val is None:
+            return
+        if self._sdef.key == "pv_total_power":
+            val = int(round(val))
+        elif self._sdef.key == "pv_total_current":
             val = round(val, 2)
         self._attr_native_value = val
         self.async_write_ha_state()
@@ -762,6 +1028,60 @@ class VictronVeBusAcOutSensor(SensorEntity):
     def set_custom_name(self, custom_name: str) -> None:
         self._custom_name = custom_name
         self.async_write_ha_state()
+
+    @callback
+    def handle_value(self, payload: dict[str, Any]) -> None:
+        val = _parse_numeric_value(payload)
+        if val is None:
+            return
+        if self._sdef.device_class == SensorDeviceClass.FREQUENCY:
+            val = round(val, 2)
+        self._attr_native_value = val
+        self.async_write_ha_state()
+
+
+class VictronVeBusAcLoadSensor(SensorEntity):
+    """Optional VE.Bus AC-Load sensors (Total and per phase)."""
+
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        cfg_name: str,
+        cfg_slug: str,
+        portal_id: str,
+        acload_instance: str,
+        sdef: _SensorDef,
+    ) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._cfg_name = cfg_name
+        self._cfg_slug = cfg_slug
+        self._portal = portal_id
+        self._instance = acload_instance
+        self._sdef = sdef
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{portal_id}_cerbo_gx")},
+            name=HUB_NAME,
+            manufacturer=MANUFACTURER,
+            model=HUB_MODEL,
+        )
+
+        self._attr_name = f"VE-Bus {sdef.entity_name}"
+        self._attr_unique_id = f"{entry.entry_id}_acload_{acload_instance}_{sdef.key}"
+        self._attr_suggested_object_id = f"{cfg_slug}_ve_bus_{sdef.object_id_suffix}"
+
+        self._attr_device_class = sdef.device_class
+        self._attr_state_class = sdef.state_class
+        self._attr_native_unit_of_measurement = sdef.unit
+
+        if sdef.device_class == SensorDeviceClass.FREQUENCY:
+            self._attr_suggested_display_precision = 2
+
+        self._attr_native_value = None
 
     @callback
     def handle_value(self, payload: dict[str, Any]) -> None:
