@@ -12,7 +12,19 @@ and this project uses pre-release versioning.
 
 ---
 
-## [0.1.9-pre-10] - 2026-01-25
+## [0.1.10-pre-11] - 2026-02-01
+
+### Added
+- VE-Bus PV Total Power (`.../system/0/Dc/Pv/Power`) – Einheit: W – **0 Nachkommastellen** (gerundet; State & Anzeige)
+- VE-Bus PV Total Current (`.../system/0/Dc/Pv/Current`) – Einheit: A – **2 Nachkommastellen** (State & Anzeige)
+
+### Changed
+- —
+
+### Fixed
+- —
+
+## [0.1.9-pre-10] - 2026-01-27
 
 ### Added
 - Optionale VE-Bus **AC-Load** Sensoren (Device: **Cerbo GX**) via Config-Option `enable_ac_load` (Default: deaktiviert):
@@ -21,10 +33,10 @@ and this project uses pre-release versioning.
 - VE-Bus ESS Minimum SOC Limit als **NumberEntity** (writeable) (`.../settings/0/Settings/CGwacs/BatteryLife/MinimumSocLimit`) – **Ganzzahlen** (0 Nachkommastellen)
 
 ### Changed
-- VE-Bus ESS Minimum SOC Limit: Eingabemodus als **Zahleneingabefeld** (`mode: box`) statt Slider.
+- VE-Bus ESS Minimum SOC Limit: UI-Modus von **Slider** auf **Zahleneingabefeld** (`mode: box`) umgestellt
 
 ### Fixed
-- (noch nichts)
+- —
 
 ## [0.1.8-pre-9] – Finaler Stand für Release
 
