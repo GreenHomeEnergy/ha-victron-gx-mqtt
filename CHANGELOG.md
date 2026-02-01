@@ -12,6 +12,20 @@ and this project uses pre-release versioning.
 
 ---
 
+## [0.1.9-pre-10] - 2026-01-25
+
+### Added
+- Optionale VE-Bus **AC-Load** Sensoren (Device: **Cerbo GX**) via Config-Option `enable_ac_load` (Default: deaktiviert):
+  - AC-Load Total: Voltage, Power, Current, Frequency (**2 Nachkommastellen**), Forwarded Energy
+  - AC-Load L1/L2/L3: Power, Voltage, Current, Forwarded Energy
+- VE-Bus ESS Minimum SOC Limit als **NumberEntity** (writeable) (`.../settings/0/Settings/CGwacs/BatteryLife/MinimumSocLimit`) – **Ganzzahlen** (0 Nachkommastellen)
+
+### Changed
+- VE-Bus ESS Minimum SOC Limit: Eingabemodus als **Zahleneingabefeld** (`mode: box`) statt Slider.
+
+### Fixed
+- (noch nichts)
+
 ## [0.1.8-pre-9] – Finaler Stand für Release
 
 ### Added
