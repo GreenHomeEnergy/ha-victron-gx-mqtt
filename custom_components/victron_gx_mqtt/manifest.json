@@ -13,5 +13,5 @@
   "issue_tracker": "https://github.com/GreenHomeEnergy/ha-victron-gx-mqtt/issues",
   "name": "Victron GX MQTT",
   "requirements": [],
-  "version": "1.0.0 First Final Release"
+  "version": "1.0.0"
 }
